@@ -3,7 +3,6 @@ const submitBtn = document.getElementById('submitBtn');
 const fillDemoBtn = document.getElementById('fillDemoBtn');
 const resultSection = document.getElementById('resultSection');
 const warningBox = document.getElementById('warningBox');
-const counts = document.getElementById('counts');
 const previewBody = document.getElementById('previewBody');
 
 const autoUrl = document.getElementById('autoUrl');
@@ -33,7 +32,6 @@ form.addEventListener('submit', async (event) => {
   event.preventDefault();
   warningBox.classList.add('hidden');
   previewBody.innerHTML = '';
-  counts.innerHTML = '';
 
   const payload = {
     nodeLinks: document.getElementById('nodeLinks').value,
