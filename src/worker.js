@@ -1,21 +1,28 @@
-import { CLASH_RULES_B64 } from "./rules.js";
-const CLASH_RULES = atob(CLASH_RULES_B64);
 
+import { CLASH_RULES_B64 } from "./rules.js";
+
+// Cloudflare Worker: KV short link subscription
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type' },
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET,POST,OPTIONS',
+      'access-control-allow-headers': 'content-type',
+    },
   });
 }
+
 function text(body, status = 200, contentType = 'text/plain; charset=utf-8') {
   return new Response(body, { status, headers: { 'content-type': contentType, 'access-control-allow-origin': '*' } });
 }
+
 function b64EncodeUtf8(str) { return btoa(unescape(encodeURIComponent(str))); }
 function b64DecodeUtf8(str) { return decodeURIComponent(escape(atob(str))); }
-function escapeYaml(str = '') { return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' '); }
 
 function parsePreferredEndpoints(input) {
-  return String(input || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+  return String(input || '').split('\n').map(l => l.trim()).filter(Boolean).map(line => {
     const forceReplace = line.endsWith('#');
     const parts = line.split('#').filter((p, i) => i < 2 || (i === 2 && p === ''));
     const raw = parts[0] || '';
@@ -37,7 +44,7 @@ function parseUrlLike(link, type) {
 
 function parseRawLinks(input) {
   const result = [];
-  for (const line of String(input).split(/\r?\n/).map(l => l.trim()).filter(Boolean)) {
+  for (const line of String(input).split('\n').map(l => l.trim()).filter(Boolean)) {
     if (line.startsWith('vmess://')) result.push(parseVmess(line));
     else if (line.startsWith('vless://')) result.push(parseUrlLike(line, 'vless'));
     else if (line.startsWith('trojan://')) result.push(parseUrlLike(line, 'trojan'));
@@ -60,71 +67,39 @@ function buildNodes(baseNodes, preferredEndpoints, options = {}) {
 }
 
 function encodeVmess(n) { return 'vmess://' + b64EncodeUtf8(JSON.stringify({ v: '2', ps: n.name, add: n.server, port: String(n.port), id: n.uuid, aid: '0', scy: n.cipher || 'auto', net: n.network || 'ws', type: 'none', host: n.host || '', path: n.path || '/', tls: n.tls ? 'tls' : '', sni: n.sni || '' })); }
-function encodeVless(n) { const u = new URL(`vless://${n.uuid}@${n.server}:${n.port}`); u.searchParams.set('type', n.network || 'ws'); if (n.tls) u.searchParams.set('security', 'tls'); if (n.host) u.searchParams.set('host', n.host); if (n.path) u.searchParams.set('path', n.path); u.hash = n.name; return u.toString(); }
-function encodeTrojan(n) { const u = new URL(`trojan://${n.password}@${n.server}:${n.port}`); u.searchParams.set('type', n.network || 'ws'); if (n.tls) u.searchParams.set('security', 'tls'); if (n.host) u.searchParams.set('host', n.host); u.hash = n.name; return u.toString(); }
+function encodeVless(n) { const u = new URL('vless://' + n.uuid + '@' + n.server + ':' + n.port); u.searchParams.set('type', n.network || 'ws'); if (n.tls) u.searchParams.set('security', 'tls'); if (n.host) u.searchParams.set('host', n.host); if (n.path) u.searchParams.set('path', n.path); u.hash = n.name; return u.toString(); }
+function encodeTrojan(n) { const u = new URL('trojan://' + n.password + '@' + n.server + ':' + n.port); u.searchParams.set('type', n.network || 'ws'); if (n.tls) u.searchParams.set('security', 'tls'); if (n.host) u.searchParams.set('host', n.host); u.hash = n.name; return u.toString(); }
 
 function renderRaw(nodes) { return b64EncodeUtf8(nodes.map(n => n.type==='vmess'?encodeVmess(n):n.type==='vless'?encodeVless(n):encodeTrojan(n)).filter(Boolean).join('\n')); }
 
 function renderClash(nodes) {
+  const CLASH_RULES = atob(CLASH_RULES_B64);
   const proxyList = nodes.map(n => ({ name: n.name, type: n.type, server: n.server, port: n.port, uuid: n.uuid, password: n.password, alterId: 0, cipher: 'auto', tls: n.tls, servername: n.sni || '', network: n.network || 'ws', 'ws-opts': { path: n.path || '/', headers: { Host: n.host || '' } }, udp: true, 'skip-cert-verify': true }));
   const names = proxyList.map(p => p.name);
   
-  let yaml = \`mixed-port: 7890
-allow-lan: false
-mode: rule
-log-level: warning
-unified-delay: true
-global-client-fingerprint: chrome
-
-proxies:
-\${proxyList.map(p => '  - ' + JSON.stringify(p)).join('\\n')}
-
-proxy-groups:
-  - name: 🚀 节点选择
-    type: select
-    proxies: ["♻️ 自动选择", "DIRECT", \${names.map(n => JSON.stringify(n)).join(', ')}]
-  - name: ♻️ 自动选择
-    type: url-test
-    url: http://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 50
-    proxies: [\${names.map(n => JSON.stringify(n)).join(', ')}]
-  - name: 🌍 国外媒体
-    type: select
-    proxies: ["🚀 节点选择", "♻️ 自动选择", "🎯 全球直连", \${names.map(n => JSON.stringify(n)).join(', ')}]
-  - name: 📲 电报信息
-    type: select
-    proxies: ["🚀 节点选择", "🎯 全球直连", \${names.map(n => JSON.stringify(n)).join(', ')}]
-  - name: Ⓜ️ 微软服务
-    type: select
-    proxies: ["🎯 全球直连", "🚀 节点选择", \${names.map(n => JSON.stringify(n)).join(', ')}]
-  - name: 🍎 苹果服务
-    type: select
-    proxies: ["🚀 节点选择", "🎯 全球直连", \${names.map(n => JSON.stringify(n)).join(', ')}]
-  - name: 📢 谷歌FCM
-    type: select
-    proxies: ["🚀 节点选择", "🎯 全球直连", "♻️ 自动选择", \${names.map(n => JSON.stringify(n)).join(', ')}]
-  - name: 🎯 全球直连
-    type: select
-    proxies: ["DIRECT", "🚀 节点选择", "♻️ 自动选择"]
-  - name: 🛑 全球拦截
-    type: select
-    proxies: ["REJECT", "DIRECT"]
-  - name: 🍃 应用净化
-    type: select
-    proxies: ["REJECT", "DIRECT"]
-  - name: 🐟 漏网之鱼
-    type: select
-    proxies: ["🚀 节点选择", "🎯 全球直连", "♻️ 自动选择", \${names.map(n => JSON.stringify(n)).join(', ')}]
-
-rules:
-\`;
-  return yaml + CLASH_RULES;
+  let yaml = 'mixed-port: 7890\nallow-lan: false\nmode: rule\nlog-level: warning\nunified-delay: true\nglobal-client-fingerprint: chrome\n\nproxies:\n';
+  yaml += proxyList.map(p => '  - ' + JSON.stringify(p)).join('\n') + '\n\n';
+  
+  yaml += 'proxy-groups:\n';
+  yaml += '  - name: 🚀 节点选择\n    type: select\n    proxies: ["♻️ 自动选择", "DIRECT", ' + names.map(n => JSON.stringify(n)).join(', ') + ']\n';
+  yaml += '  - name: ♻️ 自动选择\n    type: url-test\n    url: http://www.gstatic.com/generate_204\n    interval: 300\n    tolerance: 50\n    proxies: [' + names.map(n => JSON.stringify(n)).join(', ') + ']\n';
+  yaml += '  - name: 🌍 国外媒体\n    type: select\n    proxies: ["🚀 节点选择", "♻️ 自动选择", "🎯 全球直连", ' + names.map(n => JSON.stringify(n)).join(', ') + ']\n';
+  yaml += '  - name: 📲 电报信息\n    type: select\n    proxies: ["🚀 节点选择", "🎯 全球直连", ' + names.map(n => JSON.stringify(n)).join(', ') + ']\n';
+  yaml += '  - name: Ⓜ️ 微软服务\n    type: select\n    proxies: ["🎯 全球直连", "🚀 节点选择", ' + names.map(n => JSON.stringify(n)).join(', ') + ']\n';
+  yaml += '  - name: 🍎 苹果服务\n    type: select\n    proxies: ["🚀 节点选择", "🎯 全球直连", ' + names.map(n => JSON.stringify(n)).join(', ') + ']\n';
+  yaml += '  - name: 📢 谷歌FCM\n    type: select\n    proxies: ["🚀 节点选择", "🎯 全球直连", "♻️ 自动选择", ' + names.map(n => JSON.stringify(n)).join(', ') + ']\n';
+  yaml += '  - name: 🎯 全球直连\n    type: select\n    proxies: ["DIRECT", "🚀 节点选择", "♻️ 自动选择"]\n';
+  yaml += '  - name: 🛑 全球拦截\n    type: select\n    proxies: ["REJECT", "DIRECT"]\n';
+  yaml += '  - name: 🍃 应用净化\n    type: select\n    proxies: ["REJECT", "DIRECT"]\n';
+  yaml += '  - name: 🐟 漏网之鱼\n    type: select\n    proxies: ["🚀 节点选择", "🎯 全球直连", "♻️ 自动选择", ' + names.map(n => JSON.stringify(n)).join(', ') + ']\n\n';
+  
+  yaml += 'rules:\n' + CLASH_RULES;
+  return yaml;
 }
 
 function renderSurge(nodes, baseUrl, token) {
-  const p = nodes.map(n => \`\${n.name} = \${n.type==='vmess'?'vmess':'trojan'}, \${n.server}, \${n.port}, \${n.type==='vmess'?'username='+n.uuid:'password='+n.password}, ws=true, tls=\${n.tls}, sni=\${n.sni||''}\`).join('\\n');
-  return \`[General]\\nskip-proxy = 127.0.0.1, localhost\\n\\n[Proxy]\\n\${p}\\n\\n[Proxy Group]\\nProxy = select, \${nodes.map(n => n.name).join(', ')}\\n\\n[Rule]\\nFINAL,Proxy\`;
+  const p = nodes.map(n => n.name + ' = ' + (n.type==='vmess'?'vmess':'trojan') + ', ' + n.server + ', ' + n.port + ', ' + (n.type==='vmess'?'username='+n.uuid:'password='+n.password) + ', ws=true, tls=' + n.tls + ', sni=' + (n.sni||'')).join('\n');
+  return '[General]\nskip-proxy = 127.0.0.1, localhost\n\n[Proxy]\n' + p + '\n\n[Proxy Group]\nProxy = select, ' + nodes.map(n => n.name).join(', ') + '\n\n[Rule]\nFINAL,Proxy';
 }
 
 function createShortId(len = 10) {
@@ -141,8 +116,8 @@ async function handleGenerate(req, env, url) {
     if (!baseNodes.length || !eps.length) return json({ ok: false, error: '没有识别到节点或优选地址' }, 400);
     const nodes = buildNodes(baseNodes, eps, { namePrefix: body.namePrefix, keepOriginalHost: body.keepOriginalHost !== false });
     const id = createShortId();
-    await env.SUB_STORE.put(\`sub:\${id}\`, JSON.stringify({ nodes }));
-    const withToken = (t) => \`\${url.origin}/sub/\${id}?token=\${env.SUB_ACCESS_TOKEN}\${t?'&target='+t:''}\`;
+    await env.SUB_STORE.put('sub:' + id, JSON.stringify({ nodes }));
+    const withToken = (t) => url.origin + '/sub/' + id + '?token=' + env.SUB_ACCESS_TOKEN + (t ? '&target=' + t : '');
     return json({ ok: true, urls: { auto: withToken(''), clash: withToken('clash'), surge: withToken('surge') } });
   } catch(e) { return json({ ok: false, error: e.message }, 500); }
 }
@@ -151,9 +126,9 @@ async function handleSub(url, env) {
   const token = url.searchParams.get('token');
   if (env.SUB_ACCESS_TOKEN && token !== env.SUB_ACCESS_TOKEN) return text('Forbidden', 403);
   const id = url.pathname.split('/').pop();
-  const raw = await env.SUB_STORE.get(\`sub:\${id}\`);
+  const raw = await env.SUB_STORE.get('sub:' + id);
   if (!raw) return text('Not Found', 404);
-  await env.SUB_STORE.put(\`sub:\${id}\`, raw); // 自动续命
+  await env.SUB_STORE.put('sub:' + id, raw); // 自动续命
   const { nodes } = JSON.parse(raw);
   const target = url.searchParams.get('target') || 'raw';
   if (target === 'clash') return text(renderClash(nodes), 200, 'text/yaml');
