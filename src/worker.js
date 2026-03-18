@@ -261,6 +261,27 @@ function sanitizeForYamlValue(value) {
   return stripControlChars(value).trim();
 }
 
+function normalizeClashRulesText(text) {
+  const normalized = stripControlChars(text, { keepNewlines: true });
+  const lines = normalized.split('\n');
+
+  while (lines.length && !lines.at(-1).trim()) {
+    lines.pop();
+  }
+
+  // Some rule sources were pasted from a JS template string and accidentally kept the terminator line.
+  // Example tail: `\n`;\n`
+  while (lines.length && /^`[;]?$/.test(lines.at(-1).trim())) {
+    lines.pop();
+  }
+
+  if (lines.length) {
+    lines[lines.length - 1] = lines[lines.length - 1].replace(/`;\s*$/g, '').replace(/`\s*$/g, '');
+  }
+
+  return lines.join('\n');
+}
+
 function renderClashProxyYaml(node) {
   const lines = [];
   lines.push(`  - name: ${yamlQuote(sanitizeForYamlValue(node.name))}`);
@@ -309,7 +330,7 @@ function renderClashProxyYaml(node) {
 function renderClash(nodes) {
   // NOTE: CLASH_RULES_B64 is base64(UTF-8 text). Using atob() directly yields a "binary string"
   // that can introduce C1 control chars (U+0080..U+009F) after re-encoding, breaking YAML parsers.
-  const CLASH_RULES = stripControlChars(b64DecodeUtf8(CLASH_RULES_B64), { keepNewlines: true });
+  const CLASH_RULES = normalizeClashRulesText(b64DecodeUtf8(CLASH_RULES_B64));
   const safeNodes = Array.isArray(nodes) ? nodes : [];
   const names = safeNodes.map((n) => sanitizeForYamlValue(n.name)).filter(Boolean);
 
