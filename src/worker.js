@@ -23,11 +23,12 @@ function b64DecodeUtf8(str) { return decodeURIComponent(escape(atob(str))); }
 
 function stripControlChars(value, { keepNewlines = false } = {}) {
   const text = String(value ?? '');
-  const withoutC0 = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+  // Strip C0 + DEL + C1 control chars. YAML parsers often reject these.
+  const withoutControls = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
   if (keepNewlines) {
-    return withoutC0.replace(/\r\n?/g, '\n').replace(/\t/g, '  ');
+    return withoutControls.replace(/\r\n?/g, '\n').replace(/\t/g, '  ');
   }
-  return withoutC0.replace(/[\r\n\t]+/g, ' ');
+  return withoutControls.replace(/[\r\n\t]+/g, ' ');
 }
 
 function sanitizeLabel(value) {
@@ -306,7 +307,9 @@ function renderClashProxyYaml(node) {
 }
 
 function renderClash(nodes) {
-  const CLASH_RULES = stripControlChars(atob(CLASH_RULES_B64), { keepNewlines: true });
+  // NOTE: CLASH_RULES_B64 is base64(UTF-8 text). Using atob() directly yields a "binary string"
+  // that can introduce C1 control chars (U+0080..U+009F) after re-encoding, breaking YAML parsers.
+  const CLASH_RULES = stripControlChars(b64DecodeUtf8(CLASH_RULES_B64), { keepNewlines: true });
   const safeNodes = Array.isArray(nodes) ? nodes : [];
   const names = safeNodes.map((n) => sanitizeForYamlValue(n.name)).filter(Boolean);
 
@@ -440,9 +443,9 @@ async function handleSub(url, env) {
   await env.SUB_STORE.put('sub:' + id, raw); // 自动续命
   const { nodes } = JSON.parse(raw);
   const target = url.searchParams.get('target') || 'raw';
-  if (target === 'clash') return text(renderClash(nodes), 200, 'text/yaml');
-  if (target === 'surge') return text(renderSurge(nodes), 200, 'text/plain');
-  return text(renderRaw(nodes));
+  if (target === 'clash') return text(renderClash(nodes), 200, 'text/yaml; charset=utf-8');
+  if (target === 'surge') return text(renderSurge(nodes), 200, 'text/plain; charset=utf-8');
+  return text(renderRaw(nodes), 200, 'text/plain; charset=utf-8');
 }
 
 export default {
