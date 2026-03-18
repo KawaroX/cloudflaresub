@@ -67,10 +67,16 @@ cf.example.com:443#US-Edge"
 	              <label for="namePrefix">3. 备注前缀（可选）</label>
 	              <input id="namePrefix" name="namePrefix" type="text" placeholder="例如 CF" />
 	            </div>
-	            <div class="checkbox-wrap">
-	              <input id="keepOriginalHost" name="keepOriginalHost" type="checkbox" checked />
-	              <label for="keepOriginalHost">保留原节点 Host / SNI（推荐）</label>
+	            <div>
+	              <label for="subscriptionName">订阅名称（可选）</label>
+	              <input id="subscriptionName" name="subscriptionName" type="text" placeholder="例如 My-Sub" />
+	              <p class="hint">用于订阅导入时的文件名/名称显示（不同客户端支持情况不同）。</p>
 	            </div>
+	          </div>
+	
+	          <div class="checkbox-wrap">
+	            <input id="keepOriginalHost" name="keepOriginalHost" type="checkbox" checked />
+	            <label for="keepOriginalHost">保留原节点 Host / SNI（推荐）</label>
 	          </div>
 	
 	          <div class="checkbox-wrap">

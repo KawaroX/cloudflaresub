@@ -14,8 +14,15 @@ function json(data, status = 200) {
   });
 }
 
-function text(body, status = 200, contentType = 'text/plain; charset=utf-8') {
-  return new Response(body, { status, headers: { 'content-type': contentType, 'access-control-allow-origin': '*' } });
+function text(body, status = 200, contentType = 'text/plain; charset=utf-8', extraHeaders = {}) {
+  return new Response(body, {
+    status,
+    headers: {
+      'content-type': contentType,
+      'access-control-allow-origin': '*',
+      ...extraHeaders,
+    },
+  });
 }
 
 function b64EncodeUtf8(str) { return btoa(unescape(encodeURIComponent(str))); }
@@ -33,6 +40,34 @@ function stripControlChars(value, { keepNewlines = false } = {}) {
 
 function sanitizeLabel(value) {
   return stripControlChars(value).trim();
+}
+
+function sanitizeFilenameBase(value) {
+  const clean = sanitizeLabel(value)
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean.slice(0, 80) || 'subscription';
+}
+
+function toAsciiFilenameFallback(value) {
+  const base = sanitizeFilenameBase(value).normalize('NFKD').replace(/[^\x20-\x7E]+/g, '');
+  const safe = base.replace(/["\\]/g, "'").trim();
+  return safe || 'subscription';
+}
+
+function buildContentDisposition(filename) {
+  const utf8Name = sanitizeFilenameBase(filename);
+  const fallback = toAsciiFilenameFallback(utf8Name);
+  const encoded = encodeURIComponent(utf8Name).replace(/['()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+function ensureExtension(filename, ext) {
+  const trimmed = sanitizeFilenameBase(filename);
+  if (!ext) return trimmed;
+  if (trimmed.toLowerCase().endsWith(ext.toLowerCase())) return trimmed;
+  return `${trimmed}${ext}`;
 }
 
 function yamlQuote(value) {
@@ -414,6 +449,7 @@ async function handleGenerate(req, env, url) {
     const baseNodes = parseRawLinks(body.nodeLinks);
     const eps = parsePreferredEndpoints(body.preferredIps);
     if (!baseNodes.length || !eps.length) return json({ ok: false, error: '没有识别到节点或优选地址' }, 400);
+    const subscriptionName = sanitizeLabel(body.subscriptionName || '');
     const nodes = buildNodes(baseNodes, eps, {
       namePrefix: body.namePrefix,
       keepOriginalHost: body.keepOriginalHost !== false,
@@ -426,6 +462,7 @@ async function handleGenerate(req, env, url) {
       const link = new URL(url.origin + '/sub/' + id);
       if (hasAccessToken) link.searchParams.set('token', String(env.SUB_ACCESS_TOKEN).trim());
       if (t) link.searchParams.set('target', t);
+      if (subscriptionName) link.searchParams.set('filename', subscriptionName);
       return link.toString();
     };
 
@@ -464,9 +501,14 @@ async function handleSub(url, env) {
   await env.SUB_STORE.put('sub:' + id, raw); // 自动续命
   const { nodes } = JSON.parse(raw);
   const target = url.searchParams.get('target') || 'raw';
-  if (target === 'clash') return text(renderClash(nodes), 200, 'text/yaml; charset=utf-8');
-  if (target === 'surge') return text(renderSurge(nodes), 200, 'text/plain; charset=utf-8');
-  return text(renderRaw(nodes), 200, 'text/plain; charset=utf-8');
+  const requestedName = url.searchParams.get('filename') || url.searchParams.get('name') || '';
+  const ext = target === 'clash' ? '.yaml' : target === 'surge' ? '.conf' : '.txt';
+  const filename = ensureExtension(requestedName || 'subscription', ext);
+  const headers = { 'content-disposition': buildContentDisposition(filename) };
+
+  if (target === 'clash') return text(renderClash(nodes), 200, 'text/yaml; charset=utf-8', headers);
+  if (target === 'surge') return text(renderSurge(nodes), 200, 'text/plain; charset=utf-8', headers);
+  return text(renderRaw(nodes), 200, 'text/plain; charset=utf-8', headers);
 }
 
 export default {
