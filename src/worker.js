@@ -48,14 +48,16 @@ function parsePreferredEndpoints(input) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [raw, remark = ''] = line.split('#');
-      const value = raw.trim();
-      const hashRemark = remark.trim();
+      const parts = line.split('#');
+      const value = parts[0].trim();
+      const hashRemark = (parts[1] || '').trim();
+      const replaceMode = parts.length >= 3 && hashRemark !== '';
       const match = value.match(/^(.*?)(?::(\d+))?$/);
       return {
         server: match?.[1] || value,
         port: match?.[2] ? Number(match[2]) : undefined,
         remark: hashRemark,
+        replaceMode,
       };
     });
 }
@@ -137,14 +139,20 @@ function buildNodes(baseNodes, preferredEndpoints, options = {}) {
   for (const node of baseNodes) {
     for (const ep of preferredEndpoints) {
       counter += 1;
-      const nameParts = [];
-      if (node.name) nameParts.push(node.name);
-      if (prefix) nameParts.push(prefix);
-      if (ep.remark) nameParts.push(ep.remark);
-      else nameParts.push(String(counter));
+      let nodeName;
+      if (ep.replaceMode && ep.remark) {
+        nodeName = ep.remark;
+      } else {
+        const nameParts = [];
+        if (node.name) nameParts.push(node.name);
+        if (prefix) nameParts.push(prefix);
+        if (ep.remark) nameParts.push(ep.remark);
+        else nameParts.push(String(counter));
+        nodeName = nameParts.join(' | ');
+      }
       output.push({
         ...node,
-        name: nameParts.join(' | '),
+        name: nodeName,
         server: ep.server,
         port: ep.port || node.port,
         host: options.keepOriginalHost ? node.host : '',
@@ -387,15 +395,10 @@ async function handleGenerate(request, env, url) {
 
   if (!id) {
     id = await createUniqueShortId(env);
-    const ttl = 60 * 60 * 24 * 7; // 7天
 
-    await env.SUB_STORE.put(`sub:${id}`, JSON.stringify(payload), {
-      expirationTtl: ttl,
-    });
+    await env.SUB_STORE.put(`sub:${id}`, JSON.stringify(payload));
 
-    await env.SUB_STORE.put(dedupKey, id, {
-      expirationTtl: ttl,
-    });
+    await env.SUB_STORE.put(dedupKey, id);
   }
 
   const origin = url.origin;

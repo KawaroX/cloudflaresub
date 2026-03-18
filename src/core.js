@@ -162,7 +162,9 @@ export function expandNodes(baseNodes, endpoints, options = {}) {
       const clone = deepClone(baseNode);
       clone.server = endpoint.host;
       clone.port = port;
-      clone.name = buildNodeName(baseNode.name, suffix);
+      clone.name = endpoint.replaceMode && endpoint.label
+        ? endpoint.label
+        : buildNodeName(baseNode.name, suffix);
       clone.endpointLabel = endpoint.label || '';
       clone.endpointSource = `${endpoint.host}:${port}`;
 
@@ -527,16 +529,17 @@ function parseEndpoint(rawLine) {
     throw new Error('优选地址为空');
   }
 
-  const hashIndex = raw.indexOf('#');
-  const hostPart = hashIndex >= 0 ? raw.slice(0, hashIndex).trim() : raw;
-  const label = hashIndex >= 0 ? raw.slice(hashIndex + 1).trim() : '';
+  const parts = raw.split('#');
+  const hostPart = parts[0].trim();
+  const label = parts.length >= 2 ? parts[1].trim() : '';
+  const replaceMode = parts.length >= 3 && label !== '';
   const { host, port } = splitHostAndPort(hostPart);
 
   if (!host) {
     throw new Error(`无效地址：${raw}`);
   }
 
-  return { host, port, label };
+  return { host, port, label, replaceMode };
 }
 
 function splitHostAndPort(input) {
