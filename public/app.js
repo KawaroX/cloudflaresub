@@ -61,20 +61,24 @@ form.addEventListener('submit', async (event) => {
     if (!response.ok || !data.ok) {
       throw new Error(data.error || '生成失败');
     }
+    if (!data.urls) {
+      throw new Error('服务端返回缺少 urls，可能前后端版本不匹配。请重新部署 Worker。');
+    }
 
     autoUrl.value = data.urls.auto;
-    rawUrl.value = data.urls.raw;
-    document.getElementById('rocketUrl').value = data.urls.raw;
+    rawUrl.value = data.urls.raw ?? data.urls.auto ?? '';
+    document.getElementById('rocketUrl').value = data.urls.raw ?? data.urls.auto ?? '';
     clashUrl.value = data.urls.clash;
     surgeUrl.value = data.urls.surge;
 
     emptyState.classList.add('hidden');
 
-    document.getElementById('statInputNodes').textContent = data.counts.inputNodes;
-    document.getElementById('statEndpoints').textContent = data.counts.preferredEndpoints;
-    document.getElementById('statOutputNodes').textContent = data.counts.outputNodes;
+    const counts = data.counts || {};
+    document.getElementById('statInputNodes').textContent = counts.inputNodes ?? '-';
+    document.getElementById('statEndpoints').textContent = counts.preferredEndpoints ?? '-';
+    document.getElementById('statOutputNodes').textContent = counts.outputNodes ?? '-';
 
-    previewBody.innerHTML = data.preview
+    previewBody.innerHTML = (Array.isArray(data.preview) ? data.preview : [])
       .map(
         (item) => `
           <tr>

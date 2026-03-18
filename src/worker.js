@@ -110,6 +110,9 @@ function createShortId(len = 10) {
 
 async function handleGenerate(req, env, url) {
   try {
+    if (!env?.SUB_STORE) {
+      return json({ ok: false, error: '未绑定 KV：请在 Cloudflare Workers 里配置 SUB_STORE（KV namespace binding）。' }, 500);
+    }
     const body = await req.json();
     const baseNodes = parseRawLinks(body.nodeLinks);
     const eps = parsePreferredEndpoints(body.preferredIps);
@@ -117,8 +120,37 @@ async function handleGenerate(req, env, url) {
     const nodes = buildNodes(baseNodes, eps, { namePrefix: body.namePrefix, keepOriginalHost: body.keepOriginalHost !== false });
     const id = createShortId();
     await env.SUB_STORE.put('sub:' + id, JSON.stringify({ nodes }));
-    const withToken = (t) => url.origin + '/sub/' + id + '?token=' + env.SUB_ACCESS_TOKEN + (t ? '&target=' + t : '');
-    return json({ ok: true, urls: { auto: withToken(''), clash: withToken('clash'), surge: withToken('surge') } });
+    const hasAccessToken = Boolean(env.SUB_ACCESS_TOKEN && String(env.SUB_ACCESS_TOKEN).trim());
+    const withToken = (t) => {
+      const link = new URL(url.origin + '/sub/' + id);
+      if (hasAccessToken) link.searchParams.set('token', String(env.SUB_ACCESS_TOKEN).trim());
+      if (t) link.searchParams.set('target', t);
+      return link.toString();
+    };
+
+    return json({
+      ok: true,
+      urls: {
+        auto: withToken(''),
+        raw: withToken(''),
+        clash: withToken('clash'),
+        surge: withToken('surge'),
+      },
+      counts: {
+        inputNodes: baseNodes.length,
+        preferredEndpoints: eps.length,
+        outputNodes: nodes.length,
+      },
+      preview: nodes.slice(0, 20).map((node) => ({
+        name: node.name,
+        type: node.type,
+        server: node.server,
+        port: node.port,
+        host: node.host || '',
+        sni: node.sni || '',
+      })),
+      warnings: [],
+    });
   } catch(e) { return json({ ok: false, error: e.message }, 500); }
 }
 
