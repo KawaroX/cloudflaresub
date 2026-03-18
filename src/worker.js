@@ -52,6 +52,9 @@ function detectCountryCodeFromName(name) {
   const upper = raw.toUpperCase();
 
   const tests = [
+    { code: 'CN', target: 'upper', re: /(^|[^A-Z])CN(H)?([^A-Z]|$)/ },
+    { code: 'CN', target: 'raw', re: /CHINA/i },
+    { code: 'CN', target: 'raw', re: /(中国|中國|大陆|大陸)/ },
     { code: 'HK', target: 'upper', re: /(^|[^A-Z])HK(G)?([^A-Z]|$)/ },
     { code: 'HK', target: 'raw', re: /香港/ },
     { code: 'TW', target: 'upper', re: /(^|[^A-Z])TW(N)?([^A-Z]|$)/ },
@@ -142,7 +145,8 @@ function maybeAddFlagEmojiToName(name) {
   if (/[\u{1F1E6}-\u{1F1FF}]{2}/u.test(clean)) return clean;
   const code = detectCountryCodeFromName(clean);
   if (!code) return clean;
-  const flag = codeToFlagEmoji(code);
+  const flagCode = code === 'TW' ? 'CN' : code;
+  const flag = codeToFlagEmoji(flagCode);
   return flag ? `${flag} ${clean}` : clean;
 }
 
