@@ -235,7 +235,7 @@ function renderClash(nodes) {
       port: node.port,
       udp: true,
       tls: node.tls,
-      sni: node.sni || '',
+      servername: node.sni || '',
       'skip-cert-verify': true,
     };
 
@@ -282,101 +282,7 @@ function renderClash(nodes) {
 
   const proxyNames = proxyList.map(p => p.name);
 
-  const config = {
-    'mixed-port': 7890,
-    'allow-lan': false,
-    mode: 'rule',
-    'log-level': 'warning',
-    'unified-delay': true,
-    'global-client-fingerprint': 'chrome',
-    proxies: proxyList,
-    'proxy-groups': [
-      {
-        name: '🚀 节点选择',
-        type: 'select',
-        proxies: ['♻️ 自动选择', 'DIRECT', ...proxyNames]
-      },
-      {
-        name: '♻️ 自动选择',
-        type: 'url-test',
-        url: 'http://www.gstatic.com/generate_204',
-        interval: 300,
-        tolerance: 50,
-        proxies: proxyNames
-      },
-      {
-        name: '🌍 国外媒体',
-        type: 'select',
-        proxies: ['🚀 节点选择', '♻️ 自动选择', '🎯 全球直连', ...proxyNames]
-      },
-      {
-        name: '📲 电报信息',
-        type: 'select',
-        proxies: ['🚀 节点选择', '🎯 全球直连', ...proxyNames]
-      },
-      {
-        name: 'Ⓜ️ 微软服务',
-        type: 'select',
-        proxies: ['🎯 全球直连', '🚀 节点选择', ...proxyNames]
-      },
-      {
-        name: '🍎 苹果服务',
-        type: 'select',
-        proxies: ['🚀 节点选择', '🎯 全球直连', ...proxyNames]
-      },
-      {
-        name: '📢 谷歌FCM',
-        type: 'select',
-        proxies: ['🚀 节点选择', '🎯 全球直连', '♻️ 自动选择', ...proxyNames]
-      },
-      {
-        name: '🎯 全球直连',
-        type: 'select',
-        proxies: ['DIRECT', '🚀 节点选择', '♻️ 自动选择']
-      },
-      {
-        name: '🛑 全球拦截',
-        type: 'select',
-        proxies: ['REJECT', 'DIRECT']
-      },
-      {
-        name: '🍃 应用净化',
-        type: 'select',
-        proxies: ['REJECT', 'DIRECT']
-      },
-      {
-        name: '🐟 漏网之鱼',
-        type: 'select',
-        proxies: ['🚀 节点选择', '🎯 全球直连', '♻️ 自动选择', ...proxyNames]
-      }
-    ],
-    rules: [
-      'DOMAIN-SUFFIX,acl4.ssr,🎯 全球直连',
-      'DOMAIN-SUFFIX,ip6-localhost,🎯 全球直连',
-      'DOMAIN-SUFFIX,ip6-loopback,🎯 全球直连',
-      'DOMAIN-SUFFIX,internal,🎯 全球直连',
-      'DOMAIN-SUFFIX,lan,🎯 全球直连',
-      'DOMAIN-SUFFIX,local,🎯 全球直连',
-      'DOMAIN-SUFFIX,localhost,🎯 全球直连',
-      'IP-CIDR,0.0.0.0/8,🎯 全球直连,no-resolve',
-      'IP-CIDR,10.0.0.0/8,🎯 全球直连,no-resolve',
-      'IP-CIDR,100.64.0.0/10,🎯 全球直连,no-resolve',
-      'IP-CIDR,127.0.0.0/8,🎯 全球直连,no-resolve',
-      'IP-CIDR,169.254.0.0/16,🎯 全球直连,no-resolve',
-      'IP-CIDR,172.16.0.0/12,🎯 全球直连,no-resolve',
-      'IP-CIDR,192.168.0.0/16,🎯 全球直连,no-resolve',
-      'IP-CIDR,198.18.0.0/16,🎯 全球直连,no-resolve',
-      'IP-CIDR,224.0.0.0/4,🎯 全球直连,no-resolve',
-      'IP-CIDR6,::1/128,🎯 全球直连,no-resolve',
-      'IP-CIDR6,fc00::/7,🎯 全球直连,no-resolve',
-      'IP-CIDR6,fe80::/10,🎯 全球直连,no-resolve',
-      'IP-CIDR6,fd00::/8,🎯 全球直连,no-resolve',
-      // ... 此处为了代码整洁，我将使用模板字符串嵌入您提供的剩余规则 ...
-    ]
-  };
-
-  // 由于规则非常多，直接构建字符串比构建 JS 对象再序列化更稳妥
-  let yaml = `
+  let yaml = \`
 mixed-port: 7890
 allow-lan: false
 mode: rule
@@ -385,7 +291,7 @@ unified-delay: true
 global-client-fingerprint: chrome
 
 proxies:
-${proxyList.map(p => `  - ${JSON.stringify(p)}`).join('\n')}
+\${proxyList.map(p => \`  - \${JSON.stringify(p)}\`).join('\\n')}
 
 proxy-groups:
   - name: 🚀 节点选择
@@ -393,46 +299,46 @@ proxy-groups:
     proxies:
       - ♻️ 自动选择
       - DIRECT
-${proxyNames.map(n => `      - "${n}"`).join('\n')}
+\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
   - name: ♻️ 自动选择
     type: url-test
     url: http://www.gstatic.com/generate_204
     interval: 300
     tolerance: 50
     proxies:
-${proxyNames.map(n => `      - "${n}"`).join('\n')}
+\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
   - name: 🌍 国外媒体
     type: select
     proxies:
       - 🚀 节点选择
       - ♻️ 自动选择
       - 🎯 全球直连
-${proxyNames.map(n => `      - "${n}"`).join('\n')}
+\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
   - name: 📲 电报信息
     type: select
     proxies:
       - 🚀 节点选择
       - 🎯 全球直连
-${proxyNames.map(n => `      - "${n}"`).join('\n')}
+\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
   - name: Ⓜ️ 微软服务
     type: select
     proxies:
       - 🎯 全球直连
       - 🚀 节点选择
-${proxyNames.map(n => `      - "${n}"`).join('\n')}
+\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
   - name: 🍎 苹果服务
     type: select
     proxies:
       - 🚀 节点选择
       - 🎯 全球直连
-${proxyNames.map(n => `      - "${n}"`).join('\n')}
+\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
   - name: 📢 谷歌FCM
     type: select
     proxies:
       - 🚀 节点选择
       - 🎯 全球直连
       - ♻️ 自动选择
-${proxyNames.map(n => `      - "${n}"`).join('\n')}
+\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
   - name: 🎯 全球直连
     type: select
     proxies:
@@ -455,19 +361,235 @@ ${proxyNames.map(n => `      - "${n}"`).join('\n')}
       - 🚀 节点选择
       - 🎯 全球直连
       - ♻️ 自动选择
-${proxyNames.map(n => `      - "${n}"`).join('\n')}
+\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
 
 rules:
-`;
+\`;
 
-  // 注入您提供的完整规则（这里我使用了您文件中的完整逻辑）
-  yaml += CLASH_RULES; 
-
+  yaml += CLASH_RULES;
   return yaml;
 }
 
-// 这里的 CLASH_RULES 会包含您上传的 3000 多行规则
-const CLASH_RULES = `
+function renderSurge(nodes, baseUrl, accessToken) {
+  const proxies = nodes
+    .filter((node) => node.type === 'vmess' || node.type === 'trojan')
+    .map((node) => {
+      if (node.type === 'vmess') {
+        return \`\${node.name} = vmess, \${node.server}, \${node.port}, username=\${node.uuid}, ws=true, ws-path=\${node.path || '/'}, ws-headers=Host:\${node.host || ''}, tls=\${node.tls ? 'true' : 'false'}, sni=\${node.sni || ''}\`;
+      }
+      return \`\${node.name} = trojan, \${node.server}, \${node.port}, password=\${node.password || ''}, sni=\${node.sni || ''}\`;
+    });
+
+  return [
+    '[General]',
+    'skip-proxy = 127.0.0.1, localhost',
+    '',
+    '[Proxy]',
+    ...proxies,
+    '',
+    '[Proxy Group]',
+    'Proxy = select, ' +
+      nodes
+        .filter((n) => n.type === 'vmess' || n.type === 'trojan')
+        .map((n) => n.name)
+        .join(', '),
+    '',
+    '[Rule]',
+    'FINAL,Proxy',
+    '',
+    '; token-protected subscription',
+    \`; \${baseUrl}?token=\${accessToken}\`,
+  ].join('\\n');
+}
+
+function createShortId(length = 10) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  let out = '';
+  for (let i = 0; i < length; i++) {
+    out += chars[bytes[i] % chars.length];
+  }
+  return out;
+}
+
+async function createUniqueShortId(env, tries = 8) {
+  for (let i = 0; i < tries; i++) {
+    const id = createShortId(10);
+    const exists = await env.SUB_STORE.get(\`sub:\${id}\`);
+    if (!exists) return id;
+  }
+  throw new Error('无法生成唯一短链接，请稍后再试');
+}
+
+function normalizeLines(value = '') {
+  return String(value)
+    .split(/\\r?\\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .sort()
+    .join('\\n');
+}
+
+async function sha256Hex(input) {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function buildDedupHash(body) {
+  const normalized = {
+    nodeLinks: normalizeLines(body.nodeLinks || ''),
+    preferredIps: normalizeLines(body.preferredIps || ''),
+    namePrefix: String(body.namePrefix || '').trim(),
+    keepOriginalHost: body.keepOriginalHost !== false,
+  };
+  return sha256Hex(JSON.stringify(normalized));
+}
+
+async function handleGenerate(request, env, url) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ ok: false, error: '请求体不是合法 JSON' }, 400);
+  }
+
+  const baseNodes = parseRawLinks(body.nodeLinks || '');
+  const preferredEndpoints = parsePreferredEndpoints(body.preferredIps || '');
+
+  if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
+  if (!preferredEndpoints.length) return json({ ok: false, error: '没有识别到可用优选地址' }, 400);
+
+  const options = {
+    namePrefix: body.namePrefix || '',
+    keepOriginalHost: body.keepOriginalHost !== false,
+  };
+
+  const nodes = buildNodes(baseNodes, preferredEndpoints, options);
+
+  const payload = {
+    version: 1,
+    createdAt: new Date().toISOString(),
+    options,
+    nodes,
+  };
+
+  const dedupHash = await buildDedupHash(body);
+  const dedupKey = \`dedup:\${dedupHash}\`;
+
+  let id = await env.SUB_STORE.get(dedupKey);
+
+  if (!id) {
+    id = await createUniqueShortId(env);
+    await env.SUB_STORE.put(\`sub:\${id}\`, JSON.stringify(payload));
+    await env.SUB_STORE.put(dedupKey, id);
+  }
+
+  const origin = url.origin;
+  const accessToken = env.SUB_ACCESS_TOKEN || '';
+  const withToken = (target) =>
+    \`\${origin}/sub/\${id}\${
+      target
+        ? \`?target=\${target}&token=\${encodeURIComponent(accessToken)}\`
+        : \`?token=\${encodeURIComponent(accessToken)}\`
+    }\`;
+
+  return json({
+    ok: true,
+    storage: 'kv',
+    deduplicated: true,
+    shortId: id,
+    urls: {
+      auto: withToken(''),
+      raw: withToken('raw'),
+      clash: withToken('clash'),
+      surge: withToken('surge'),
+    },
+    counts: {
+      inputNodes: baseNodes.length,
+      preferredEndpoints: preferredEndpoints.length,
+      outputNodes: nodes.length,
+    },
+    preview: nodes.slice(0, 20).map((node) => ({
+      name: node.name,
+      type: node.type,
+      server: node.server,
+      port: node.port,
+      host: node.host || '',
+      sni: node.sni || '',
+    })),
+    warnings: accessToken ? [] : ['未检测到 SUB_ACCESS_TOKEN，订阅链接将没有第二层访问保护。'],
+  });
+}
+
+function validateAccessToken(url, env) {
+  const expected = env.SUB_ACCESS_TOKEN;
+  if (!expected) return { ok: true };
+  const provided = url.searchParams.get('token') || '';
+  if (!provided || provided !== expected) {
+    return { ok: false, response: text('Forbidden: invalid token', 403) };
+  }
+  return { ok: true };
+}
+
+async function handleSub(url, env) {
+  const tokenCheck = validateAccessToken(url, env);
+  if (!tokenCheck.ok) return tokenCheck.response;
+
+  const id = url.pathname.split('/').pop();
+  if (!id) return text('missing id', 400);
+
+  const raw = await env.SUB_STORE.get(\`sub:\${id}\`);
+  if (!raw) return text('not found', 404);
+
+  await env.SUB_STORE.put(\`sub:\${id}\`, raw);
+
+  const record = JSON.parse(raw);
+  const nodes = record.nodes || [];
+  const target = (url.searchParams.get('target') || 'raw').toLowerCase();
+
+  if (target === 'clash') {
+    return text(renderClash(nodes), 200, 'text/yaml; charset=utf-8');
+  }
+  if (target === 'surge') {
+    return text(
+      renderSurge(nodes, url.origin + url.pathname, env.SUB_ACCESS_TOKEN || ''),
+      200,
+      'text/plain; charset=utf-8',
+    );
+  }
+  return text(renderRaw(nodes), 200, 'text/plain; charset=utf-8');
+}
+
+export default {
+  async fetch(request, env) {
+    try {
+      const url = new URL(request.url);
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          headers: {
+            'access-control-allow-origin': '*',
+            'access-control-allow-methods': 'GET,POST,OPTIONS',
+            'access-control-allow-headers': 'content-type',
+          },
+        });
+      }
+      if (request.method === 'POST' && url.pathname === '/api/generate') {
+        return await handleGenerate(request, env, url);
+      }
+      if (request.method === 'GET' && url.pathname.startsWith('/sub/')) {
+        return await handleSub(url, env);
+      }
+      return await env.ASSETS.fetch(request);
+    } catch (err) {
+      return json({ ok: false, error: err.message, stack: err.stack }, 500);
+    }
+  },
+};
+
+const CLASH_RULES = \`
   - DOMAIN-SUFFIX,acl4.ssr,🎯 全球直连
   - DOMAIN-SUFFIX,ip6-localhost,🎯 全球直连
   - DOMAIN-SUFFIX,ip6-loopback,🎯 全球直连
@@ -3988,59 +4110,4 @@ const CLASH_RULES = `
   - GEOIP,CN,🎯 全球直连
   - MATCH,🐟 漏网之鱼
 `;
-
-async function handleSub(url, env) {
-  const tokenCheck = validateAccessToken(url, env);
-  if (!tokenCheck.ok) return tokenCheck.response;
-
-  const id = url.pathname.split('/').pop();
-  if (!id) return text('missing id', 400);
-
-  const raw = await env.SUB_STORE.get(`sub:${id}`);
-  if (!raw) return text('not found', 404);
-
-  // 自动续命：再次写入以移除过期时间
-  await env.SUB_STORE.put(`sub:${id}`, raw);
-
-  const record = JSON.parse(raw);
-  const nodes = record.nodes || [];
-  const target = (url.searchParams.get('target') || 'raw').toLowerCase();
-
-  if (target === 'clash') {
-    return text(renderClash(nodes), 200, 'text/yaml; charset=utf-8');
-  }
-  if (target === 'surge') {
-    return text(
-      renderSurge(nodes, url.origin + url.pathname, env.SUB_ACCESS_TOKEN || ''),
-      200,
-      'text/plain; charset=utf-8',
-    );
-  }
-  return text(renderRaw(nodes), 200, 'text/plain; charset=utf-8');
-}
-
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'access-control-allow-origin': '*',
-          'access-control-allow-methods': 'GET,POST,OPTIONS',
-          'access-control-allow-headers': 'content-type',
-        },
-      });
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/generate') {
-      return handleGenerate(request, env, url);
-    }
-
-    if (request.method === 'GET' && url.pathname.startsWith('/sub/')) {
-      return handleSub(url, env);
-    }
-
-    return env.ASSETS.fetch(request);
-  },
-};
+`;
