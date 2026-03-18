@@ -38,12 +38,13 @@ form.addEventListener('submit', async (event) => {
   warningBox.classList.add('hidden');
   previewBody.innerHTML = '';
 
-  const payload = {
-    nodeLinks: document.getElementById('nodeLinks').value,
-    preferredIps: document.getElementById('preferredIps').value,
-    namePrefix: document.getElementById('namePrefix').value,
-    keepOriginalHost: document.getElementById('keepOriginalHost').checked,
-  };
+	  const payload = {
+	    nodeLinks: document.getElementById('nodeLinks').value,
+	    preferredIps: document.getElementById('preferredIps').value,
+	    namePrefix: document.getElementById('namePrefix').value,
+	    keepOriginalHost: document.getElementById('keepOriginalHost').checked,
+	    addFlagEmoji: document.getElementById('addFlagEmoji').checked,
+	  };
 
   submitBtn.disabled = true;
   submitBtn.textContent = '生成中...';

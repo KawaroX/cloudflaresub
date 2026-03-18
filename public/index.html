@@ -62,21 +62,26 @@ cf.example.com:443#US-Edge"
             </p>
           </div>
 
-          <div class="grid two-col compact">
-            <div>
-              <label for="namePrefix">3. 备注前缀（可选）</label>
-              <input id="namePrefix" name="namePrefix" type="text" placeholder="例如 CF" />
-            </div>
-            <div class="checkbox-wrap">
-              <input id="keepOriginalHost" name="keepOriginalHost" type="checkbox" checked />
-              <label for="keepOriginalHost">保留原节点 Host / SNI（推荐）</label>
-            </div>
-          </div>
+	          <div class="grid two-col compact">
+	            <div>
+	              <label for="namePrefix">3. 备注前缀（可选）</label>
+	              <input id="namePrefix" name="namePrefix" type="text" placeholder="例如 CF" />
+	            </div>
+	            <div class="checkbox-wrap">
+	              <input id="keepOriginalHost" name="keepOriginalHost" type="checkbox" checked />
+	              <label for="keepOriginalHost">保留原节点 Host / SNI（推荐）</label>
+	            </div>
+	          </div>
+	
+	          <div class="checkbox-wrap">
+	            <input id="addFlagEmoji" name="addFlagEmoji" type="checkbox" />
+	            <label for="addFlagEmoji">根据节点名称添加国家旗帜 Emoji（如 US / 美国）</label>
+	          </div>
 
-          <div class="actions">
-            <button id="submitBtn" type="submit">生成订阅</button>
-            <button id="fillDemoBtn" type="button" class="secondary">填入演示数据</button>
-          </div>
+	          <div class="actions">
+	            <button id="submitBtn" type="submit">生成订阅</button>
+	            <button id="fillDemoBtn" type="button" class="secondary">填入演示数据</button>
+	          </div>
         </form>
 
         <aside class="card stack-md tips">
