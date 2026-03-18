@@ -1,10 +1,4 @@
-// Cloudflare Worker: KV short link subscription + access token protection
-// Requires:
-// - KV namespace binding: SUB_STORE
-// - Secret/Variable: SUB_ACCESS_TOKEN
-// Optional:
-// - Secret/Variable: SUB_LINK_SECRET (legacy long-token compatibility)
-
+// Cloudflare Worker: KV short link subscription
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
@@ -16,274 +10,70 @@ function json(data, status = 200) {
     },
   });
 }
-
 function text(body, status = 200, contentType = 'text/plain; charset=utf-8') {
-  return new Response(body, {
-    status,
-    headers: {
-      'content-type': contentType,
-      'access-control-allow-origin': '*',
-    },
+  return new Response(body, { status, headers: { 'content-type': contentType, 'access-control-allow-origin': '*' } });
+}
+function b64EncodeUtf8(str) { return btoa(unescape(encodeURIComponent(str))); }
+function b64DecodeUtf8(str) { return decodeURIComponent(escape(atob(str))); }
+function escapeYaml(str = '') { return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' '); }
+
+function parsePreferredEndpoints(input) {
+  return String(input || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+    const forceReplace = line.endsWith('#');
+    const parts = line.split('#').filter((p, i) => i < 2 || (i === 2 && p === ''));
+    const raw = parts[0] || '';
+    const remark = parts[1] || '';
+    const match = raw.trim().match(/^(.*?)(?::(\d+))?$/);
+    return { server: match?.[1] || raw.trim(), port: match?.[2] ? Number(match[2]) : undefined, remark: remark.trim(), forceReplace };
   });
 }
 
-function b64EncodeUtf8(str) {
-  return btoa(unescape(encodeURIComponent(str)));
-}
-
-function b64DecodeUtf8(str) {
-  return decodeURIComponent(escape(atob(str)));
-}
-
-function escapeYaml(str = '') {
-  return String(str)
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, ' ');
-}
-
-function parsePreferredEndpoints(input) {
-  return String(input || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const forceReplace = line.endsWith('#');
-      const parts = line.split('#').filter((p, i) => i < 2 || (i === 2 && p === ''));
-      const raw = parts[0] || '';
-      const remark = parts[1] || '';
-      
-      const value = raw.trim();
-      const hashRemark = remark.trim();
-      const match = value.match(/^(.*?)(?::(\d+))?$/);
-      return {
-        server: match?.[1] || value,
-        port: match?.[2] ? Number(match[2]) : undefined,
-        remark: hashRemark,
-        forceReplace,
-      };
-    });
-}
-
 function parseVmess(link) {
-  const raw = link.slice('vmess://'.length).trim();
-  const obj = JSON.parse(b64DecodeUtf8(raw));
-  return {
-    type: 'vmess',
-    name: obj.ps || 'vmess',
-    server: obj.add,
-    port: Number(obj.port || 443),
-    uuid: obj.id,
-    cipher: obj.scy || 'auto',
-    network: obj.net || 'ws',
-    tls: obj.tls === 'tls',
-    host: obj.host || '',
-    path: obj.path || '/',
-    sni: obj.sni || obj.host || '',
-    alpn: obj.alpn || '',
-    fp: obj.fp || '',
-  };
+  const obj = JSON.parse(b64DecodeUtf8(link.slice(8)));
+  return { type: 'vmess', name: obj.ps || 'vmess', server: obj.add, port: Number(obj.port), uuid: obj.id, cipher: obj.scy || 'auto', network: obj.net || 'ws', tls: obj.tls === 'tls', host: obj.host || '', path: obj.path || '/', sni: obj.sni || obj.host || '' };
 }
 
 function parseUrlLike(link, type) {
   const u = new URL(link);
-  return {
-    type,
-    name: decodeURIComponent(u.hash.replace(/^#/, '')) || type,
-    server: u.hostname,
-    port: Number(u.port || 443),
-    password: type === 'trojan' ? decodeURIComponent(u.username) : undefined,
-    uuid: type === 'vless' ? decodeURIComponent(u.username) : undefined,
-    network: u.searchParams.get('type') || 'tcp',
-    tls: (u.searchParams.get('security') || '').toLowerCase() === 'tls',
-    host: u.searchParams.get('host') || u.searchParams.get('sni') || '',
-    path: u.searchParams.get('path') || '/',
-    sni: u.searchParams.get('sni') || u.searchParams.get('host') || '',
-    fp: u.searchParams.get('fp') || '',
-    alpn: u.searchParams.get('alpn') || '',
-    flow: u.searchParams.get('flow') || '',
-  };
+  return { type, name: decodeURIComponent(u.hash.replace(/^#/, '')) || type, server: u.hostname, port: Number(u.port || 443), password: type === 'trojan' ? decodeURIComponent(u.username) : undefined, uuid: type === 'vless' ? decodeURIComponent(u.username) : undefined, network: u.searchParams.get('type') || 'tcp', tls: (u.searchParams.get('security') || '').toLowerCase() === 'tls', host: u.searchParams.get('host') || u.searchParams.get('sni') || '', path: u.searchParams.get('path') || '/', sni: u.searchParams.get('sni') || u.searchParams.get('host') || '' };
 }
 
 function parseRawLinks(input) {
-  const lines = String(input || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
   const result = [];
-  for (const line of lines) {
-    if (line.startsWith('vmess://')) {
-      result.push(parseVmess(line));
-      continue;
-    }
-    if (line.startsWith('vless://')) {
-      result.push(parseUrlLike(line, 'vless'));
-      continue;
-    }
-    if (line.startsWith('trojan://')) {
-      result.push(parseUrlLike(line, 'trojan'));
-      continue;
-    }
-    try {
-      const decoded = b64DecodeUtf8(line);
-      if (/^(vmess|vless|trojan):\/\//m.test(decoded)) {
-        result.push(...parseRawLinks(decoded));
-      }
-    } catch {}
+  for (const line of String(input).split(/\r?\n/).map(l => l.trim()).filter(Boolean)) {
+    if (line.startsWith('vmess://')) result.push(parseVmess(line));
+    else if (line.startsWith('vless://')) result.push(parseUrlLike(line, 'vless'));
+    else if (line.startsWith('trojan://')) result.push(parseUrlLike(line, 'trojan'));
+    else { try { const d = b64DecodeUtf8(line); if (/^(vmess|vless|trojan):\/\//m.test(d)) result.push(...parseRawLinks(d)); } catch(e){} }
   }
   return result;
 }
 
 function buildNodes(baseNodes, preferredEndpoints, options = {}) {
   const output = [];
-  const prefix = (options.namePrefix || '').trim();
   let counter = 0;
   for (const node of baseNodes) {
     for (const ep of preferredEndpoints) {
-      counter += 1;
-      let finalName = '';
-      if (ep.forceReplace && ep.remark) {
-        finalName = ep.remark;
-      } else {
-        const nameParts = [];
-        if (node.name) nameParts.push(node.name);
-        if (prefix) nameParts.push(prefix);
-        if (ep.remark) nameParts.push(ep.remark);
-        else nameParts.push(String(counter));
-        finalName = nameParts.join(' | ');
-      }
-      
-      output.push({
-        ...node,
-        name: finalName,
-        server: ep.server,
-        port: ep.port || node.port,
-        host: options.keepOriginalHost ? node.host : '',
-        sni: options.keepOriginalHost ? node.sni : '',
-      });
+      counter++;
+      let name = ep.forceReplace && ep.remark ? ep.remark : [node.name, options.namePrefix, ep.remark || String(counter)].filter(Boolean).join(' | ');
+      output.push({ ...node, name, server: ep.server, port: ep.port || node.port, host: options.keepOriginalHost ? node.host : '', sni: options.keepOriginalHost ? node.sni : '' });
     }
   }
   return output;
 }
 
-function encodeVmess(node) {
-  const obj = {
-    v: '2',
-    ps: node.name,
-    add: node.server,
-    port: String(node.port),
-    id: node.uuid,
-    aid: '0',
-    scy: node.cipher || 'auto',
-    net: node.network || 'ws',
-    type: 'none',
-    host: node.host || '',
-    path: node.path || '/',
-    tls: node.tls ? 'tls' : '',
-    sni: node.sni || '',
-    alpn: node.alpn || '',
-    fp: node.fp || '',
-  };
-  return 'vmess://' + b64EncodeUtf8(JSON.stringify(obj));
-}
+function encodeVmess(n) { return 'vmess://' + b64EncodeUtf8(JSON.stringify({ v: '2', ps: n.name, add: n.server, port: String(n.port), id: n.uuid, aid: '0', scy: n.cipher || 'auto', net: n.network || 'ws', type: 'none', host: n.host || '', path: n.path || '/', tls: n.tls ? 'tls' : '', sni: n.sni || '' })); }
+function encodeVless(n) { const u = new URL(`vless://${n.uuid}@${n.server}:${n.port}`); u.searchParams.set('type', n.network || 'ws'); if (n.tls) u.searchParams.set('security', 'tls'); if (n.host) u.searchParams.set('host', n.host); if (n.path) u.searchParams.set('path', n.path); u.hash = n.name; return u.toString(); }
+function encodeTrojan(n) { const u = new URL(`trojan://${n.password}@${n.server}:${n.port}`); u.searchParams.set('type', n.network || 'ws'); if (n.tls) u.searchParams.set('security', 'tls'); if (n.host) u.searchParams.set('host', n.host); u.hash = n.name; return u.toString(); }
 
-function encodeVless(node) {
-  const url = new URL(`vless://${encodeURIComponent(node.uuid)}@${node.server}:${node.port}`);
-  url.searchParams.set('type', node.network || 'ws');
-  if (node.tls) url.searchParams.set('security', 'tls');
-  if (node.host) url.searchParams.set('host', node.host);
-  if (node.sni) url.searchParams.set('sni', node.sni);
-  if (node.path) url.searchParams.set('path', node.path);
-  if (node.alpn) url.searchParams.set('alpn', node.alpn);
-  if (node.fp) url.searchParams.set('fp', node.fp);
-  if (node.flow) url.searchParams.set('flow', node.flow);
-  url.hash = node.name;
-  return url.toString();
-}
-
-function encodeTrojan(node) {
-  const url = new URL(`trojan://${encodeURIComponent(node.password)}@${node.server}:${node.port}`);
-  if (node.network) url.searchParams.set('type', node.network);
-  if (node.tls) url.searchParams.set('security', 'tls');
-  if (node.host) url.searchParams.set('host', node.host);
-  if (node.sni) url.searchParams.set('sni', node.sni);
-  if (node.path) url.searchParams.set('path', node.path);
-  if (node.alpn) url.searchParams.set('alpn', node.alpn);
-  if (node.fp) url.searchParams.set('fp', node.fp);
-  url.hash = node.name;
-  return url.toString();
-}
-
-function renderRaw(nodes) {
-  const lines = nodes
-    .map((node) => {
-      if (node.type === 'vmess') return encodeVmess(node);
-      if (node.type === 'vless') return encodeVless(node);
-      if (node.type === 'trojan') return encodeTrojan(node);
-      return '';
-    })
-    .filter(Boolean);
-  return b64EncodeUtf8(lines.join('\n'));
-}
+function renderRaw(nodes) { return b64EncodeUtf8(nodes.map(n => n.type==='vmess'?encodeVmess(n):n.type==='vless'?encodeVless(n):encodeTrojan(n)).filter(Boolean).join('\n')); }
 
 function renderClash(nodes) {
-  const proxyList = nodes.map((node) => {
-    const common = {
-      name: node.name,
-      server: node.server,
-      port: node.port,
-      udp: true,
-      tls: node.tls,
-      servername: node.sni || '',
-      'skip-cert-verify': true,
-    };
-
-    if (node.type === 'vmess') {
-      return {
-        ...common,
-        type: 'vmess',
-        uuid: node.uuid,
-        alterId: 0,
-        cipher: node.cipher || 'auto',
-        network: node.network || 'ws',
-        'ws-opts': {
-          path: node.path || '/',
-          headers: { Host: node.host || '' },
-        },
-      };
-    }
-    if (node.type === 'vless') {
-      return {
-        ...common,
-        type: 'vless',
-        uuid: node.uuid,
-        network: node.network || 'ws',
-        'ws-opts': {
-          path: node.path || '/',
-          headers: { Host: node.host || '' },
-        },
-      };
-    }
-    if (node.type === 'trojan') {
-      return {
-        ...common,
-        type: 'trojan',
-        password: node.password,
-        network: node.network || 'ws',
-        'ws-opts': {
-          path: node.path || '/',
-          headers: { Host: node.host || '' },
-        },
-      };
-    }
-    return null;
-  }).filter(Boolean);
-
-  const proxyNames = proxyList.map(p => p.name);
-
-  let yaml = \`
-mixed-port: 7890
+  const proxyList = nodes.map(n => ({ name: n.name, type: n.type, server: n.server, port: n.port, uuid: n.uuid, password: n.password, alterId: 0, cipher: 'auto', tls: n.tls, servername: n.sni || '', network: n.network || 'ws', 'ws-opts': { path: n.path || '/', headers: { Host: n.host || '' } }, udp: true, 'skip-cert-verify': true }));
+  const names = proxyList.map(p => p.name);
+  const pg = (name, type, proxies) => ({ name, type, proxies });
+  
+  let yaml = `mixed-port: 7890
 allow-lan: false
 mode: rule
 log-level: warning
@@ -291,305 +81,103 @@ unified-delay: true
 global-client-fingerprint: chrome
 
 proxies:
-\${proxyList.map(p => \`  - \${JSON.stringify(p)}\`).join('\\n')}
+${proxyList.map(p => '  - ' + JSON.stringify(p)).join('\n')}
 
 proxy-groups:
   - name: 🚀 节点选择
     type: select
-    proxies:
-      - ♻️ 自动选择
-      - DIRECT
-\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
+    proxies: ["♻️ 自动选择", "DIRECT", ${names.map(n => JSON.stringify(n)).join(', ')}]
   - name: ♻️ 自动选择
     type: url-test
     url: http://www.gstatic.com/generate_204
     interval: 300
     tolerance: 50
-    proxies:
-\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
+    proxies: [${names.map(n => JSON.stringify(n)).join(', ')}]
   - name: 🌍 国外媒体
     type: select
-    proxies:
-      - 🚀 节点选择
-      - ♻️ 自动选择
-      - 🎯 全球直连
-\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
+    proxies: ["🚀 节点选择", "♻️ 自动选择", "🎯 全球直连", ${names.map(n => JSON.stringify(n)).join(', ')}]
   - name: 📲 电报信息
     type: select
-    proxies:
-      - 🚀 节点选择
-      - 🎯 全球直连
-\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
+    proxies: ["🚀 节点选择", "🎯 全球直连", ${names.map(n => JSON.stringify(n)).join(', ')}]
   - name: Ⓜ️ 微软服务
     type: select
-    proxies:
-      - 🎯 全球直连
-      - 🚀 节点选择
-\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
+    proxies: ["🎯 全球直连", "🚀 节点选择", ${names.map(n => JSON.stringify(n)).join(', ')}]
   - name: 🍎 苹果服务
     type: select
-    proxies:
-      - 🚀 节点选择
-      - 🎯 全球直连
-\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
+    proxies: ["🚀 节点选择", "🎯 全球直连", ${names.map(n => JSON.stringify(n)).join(', ')}]
   - name: 📢 谷歌FCM
     type: select
-    proxies:
-      - 🚀 节点选择
-      - 🎯 全球直连
-      - ♻️ 自动选择
-\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
+    proxies: ["🚀 节点选择", "🎯 全球直连", "♻️ 自动选择", ${names.map(n => JSON.stringify(n)).join(', ')}]
   - name: 🎯 全球直连
     type: select
-    proxies:
-      - DIRECT
-      - 🚀 节点选择
-      - ♻️ 自动选择
+    proxies: ["DIRECT", "🚀 节点选择", "♻️ 自动选择"]
   - name: 🛑 全球拦截
     type: select
-    proxies:
-      - REJECT
-      - DIRECT
+    proxies: ["REJECT", "DIRECT"]
   - name: 🍃 应用净化
     type: select
-    proxies:
-      - REJECT
-      - DIRECT
+    proxies: ["REJECT", "DIRECT"]
   - name: 🐟 漏网之鱼
     type: select
-    proxies:
-      - 🚀 节点选择
-      - 🎯 全球直连
-      - ♻️ 自动选择
-\${proxyNames.map(n => \`      - "\${n}"\`).join('\\n')}
+    proxies: ["🚀 节点选择", "🎯 全球直连", "♻️ 自动选择", ${names.map(n => JSON.stringify(n)).join(', ')}]
 
 rules:
-\`;
-
-  yaml += CLASH_RULES;
-  return yaml;
+`;
+  return yaml + CLASH_RULES;
 }
 
-function renderSurge(nodes, baseUrl, accessToken) {
-  const proxies = nodes
-    .filter((node) => node.type === 'vmess' || node.type === 'trojan')
-    .map((node) => {
-      if (node.type === 'vmess') {
-        return \`\${node.name} = vmess, \${node.server}, \${node.port}, username=\${node.uuid}, ws=true, ws-path=\${node.path || '/'}, ws-headers=Host:\${node.host || ''}, tls=\${node.tls ? 'true' : 'false'}, sni=\${node.sni || ''}\`;
-      }
-      return \`\${node.name} = trojan, \${node.server}, \${node.port}, password=\${node.password || ''}, sni=\${node.sni || ''}\`;
-    });
-
-  return [
-    '[General]',
-    'skip-proxy = 127.0.0.1, localhost',
-    '',
-    '[Proxy]',
-    ...proxies,
-    '',
-    '[Proxy Group]',
-    'Proxy = select, ' +
-      nodes
-        .filter((n) => n.type === 'vmess' || n.type === 'trojan')
-        .map((n) => n.name)
-        .join(', '),
-    '',
-    '[Rule]',
-    'FINAL,Proxy',
-    '',
-    '; token-protected subscription',
-    \`; \${baseUrl}?token=\${accessToken}\`,
-  ].join('\\n');
+function renderSurge(nodes, baseUrl, token) {
+  const p = nodes.map(n => `${n.name} = ${n.type==='vmess'?'vmess':'trojan'}, ${n.server}, ${n.port}, ${n.type==='vmess'?'username='+n.uuid:'password='+n.password}, ws=true, tls=${n.tls}, sni=${n.sni||''}`).join('\n');
+  return `[General]\nskip-proxy = 127.0.0.1, localhost\n\n[Proxy]\n${p}\n\n[Proxy Group]\nProxy = select, ${nodes.map(n => n.name).join(', ')}\n\n[Rule]\nFINAL,Proxy`;
 }
 
-function createShortId(length = 10) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  const bytes = crypto.getRandomValues(new Uint8Array(length));
-  let out = '';
-  for (let i = 0; i < length; i++) {
-    out += chars[bytes[i] % chars.length];
-  }
-  return out;
+function createShortId(len = 10) {
+  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const b = crypto.getRandomValues(new Uint8Array(len));
+  return Array.from(b).map(x => c[x % c.length]).join('');
 }
 
-async function createUniqueShortId(env, tries = 8) {
-  for (let i = 0; i < tries; i++) {
-    const id = createShortId(10);
-    const exists = await env.SUB_STORE.get(\`sub:\${id}\`);
-    if (!exists) return id;
-  }
-  throw new Error('无法生成唯一短链接，请稍后再试');
-}
-
-function normalizeLines(value = '') {
-  return String(value)
-    .split(/\\r?\\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .sort()
-    .join('\\n');
-}
-
-async function sha256Hex(input) {
-  const data = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return [...new Uint8Array(digest)]
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-async function buildDedupHash(body) {
-  const normalized = {
-    nodeLinks: normalizeLines(body.nodeLinks || ''),
-    preferredIps: normalizeLines(body.preferredIps || ''),
-    namePrefix: String(body.namePrefix || '').trim(),
-    keepOriginalHost: body.keepOriginalHost !== false,
-  };
-  return sha256Hex(JSON.stringify(normalized));
-}
-
-async function handleGenerate(request, env, url) {
-  let body;
+async function handleGenerate(req, env, url) {
   try {
-    body = await request.json();
-  } catch {
-    return json({ ok: false, error: '请求体不是合法 JSON' }, 400);
-  }
-
-  const baseNodes = parseRawLinks(body.nodeLinks || '');
-  const preferredEndpoints = parsePreferredEndpoints(body.preferredIps || '');
-
-  if (!baseNodes.length) return json({ ok: false, error: '没有识别到可用节点' }, 400);
-  if (!preferredEndpoints.length) return json({ ok: false, error: '没有识别到可用优选地址' }, 400);
-
-  const options = {
-    namePrefix: body.namePrefix || '',
-    keepOriginalHost: body.keepOriginalHost !== false,
-  };
-
-  const nodes = buildNodes(baseNodes, preferredEndpoints, options);
-
-  const payload = {
-    version: 1,
-    createdAt: new Date().toISOString(),
-    options,
-    nodes,
-  };
-
-  const dedupHash = await buildDedupHash(body);
-  const dedupKey = \`dedup:\${dedupHash}\`;
-
-  let id = await env.SUB_STORE.get(dedupKey);
-
-  if (!id) {
-    id = await createUniqueShortId(env);
-    await env.SUB_STORE.put(\`sub:\${id}\`, JSON.stringify(payload));
-    await env.SUB_STORE.put(dedupKey, id);
-  }
-
-  const origin = url.origin;
-  const accessToken = env.SUB_ACCESS_TOKEN || '';
-  const withToken = (target) =>
-    \`\${origin}/sub/\${id}\${
-      target
-        ? \`?target=\${target}&token=\${encodeURIComponent(accessToken)}\`
-        : \`?token=\${encodeURIComponent(accessToken)}\`
-    }\`;
-
-  return json({
-    ok: true,
-    storage: 'kv',
-    deduplicated: true,
-    shortId: id,
-    urls: {
-      auto: withToken(''),
-      raw: withToken('raw'),
-      clash: withToken('clash'),
-      surge: withToken('surge'),
-    },
-    counts: {
-      inputNodes: baseNodes.length,
-      preferredEndpoints: preferredEndpoints.length,
-      outputNodes: nodes.length,
-    },
-    preview: nodes.slice(0, 20).map((node) => ({
-      name: node.name,
-      type: node.type,
-      server: node.server,
-      port: node.port,
-      host: node.host || '',
-      sni: node.sni || '',
-    })),
-    warnings: accessToken ? [] : ['未检测到 SUB_ACCESS_TOKEN，订阅链接将没有第二层访问保护。'],
-  });
-}
-
-function validateAccessToken(url, env) {
-  const expected = env.SUB_ACCESS_TOKEN;
-  if (!expected) return { ok: true };
-  const provided = url.searchParams.get('token') || '';
-  if (!provided || provided !== expected) {
-    return { ok: false, response: text('Forbidden: invalid token', 403) };
-  }
-  return { ok: true };
+    const body = await req.json();
+    const baseNodes = parseRawLinks(body.nodeLinks);
+    const eps = parsePreferredEndpoints(body.preferredIps);
+    if (!baseNodes.length || !eps.length) return json({ ok: false, error: '没有识别到节点或优选地址' }, 400);
+    const nodes = buildNodes(baseNodes, eps, { namePrefix: body.namePrefix, keepOriginalHost: body.keepOriginalHost !== false });
+    const id = createShortId();
+    await env.SUB_STORE.put(`sub:${id}`, JSON.stringify({ nodes }));
+    const withToken = (t) => `${url.origin}/sub/${id}?token=${env.SUB_ACCESS_TOKEN}${t?'&target='+t:''}`;
+    return json({ ok: true, urls: { auto: withToken(''), clash: withToken('clash'), surge: withToken('surge') } });
+  } catch(e) { return json({ ok: false, error: e.message }, 500); }
 }
 
 async function handleSub(url, env) {
-  const tokenCheck = validateAccessToken(url, env);
-  if (!tokenCheck.ok) return tokenCheck.response;
-
+  const token = url.searchParams.get('token');
+  if (env.SUB_ACCESS_TOKEN && token !== env.SUB_ACCESS_TOKEN) return text('Forbidden', 403);
   const id = url.pathname.split('/').pop();
-  if (!id) return text('missing id', 400);
-
-  const raw = await env.SUB_STORE.get(\`sub:\${id}\`);
-  if (!raw) return text('not found', 404);
-
-  await env.SUB_STORE.put(\`sub:\${id}\`, raw);
-
-  const record = JSON.parse(raw);
-  const nodes = record.nodes || [];
-  const target = (url.searchParams.get('target') || 'raw').toLowerCase();
-
-  if (target === 'clash') {
-    return text(renderClash(nodes), 200, 'text/yaml; charset=utf-8');
-  }
-  if (target === 'surge') {
-    return text(
-      renderSurge(nodes, url.origin + url.pathname, env.SUB_ACCESS_TOKEN || ''),
-      200,
-      'text/plain; charset=utf-8',
-    );
-  }
-  return text(renderRaw(nodes), 200, 'text/plain; charset=utf-8');
+  const raw = await env.SUB_STORE.get(`sub:${id}`);
+  if (!raw) return text('Not Found', 404);
+  await env.SUB_STORE.put(`sub:${id}`, raw); // 自动续命
+  const { nodes } = JSON.parse(raw);
+  const target = url.searchParams.get('target') || 'raw';
+  if (target === 'clash') return text(renderClash(nodes), 200, 'text/yaml');
+  if (target === 'surge') return text(renderSurge(nodes), 200, 'text/plain');
+  return text(renderRaw(nodes));
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(req, env) {
     try {
-      const url = new URL(request.url);
-      if (request.method === 'OPTIONS') {
-        return new Response(null, {
-          headers: {
-            'access-control-allow-origin': '*',
-            'access-control-allow-methods': 'GET,POST,OPTIONS',
-            'access-control-allow-headers': 'content-type',
-          },
-        });
-      }
-      if (request.method === 'POST' && url.pathname === '/api/generate') {
-        return await handleGenerate(request, env, url);
-      }
-      if (request.method === 'GET' && url.pathname.startsWith('/sub/')) {
-        return await handleSub(url, env);
-      }
-      return await env.ASSETS.fetch(request);
-    } catch (err) {
-      return json({ ok: false, error: err.message, stack: err.stack }, 500);
-    }
-  },
+      const url = new URL(req.url);
+      if (req.method === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type' } });
+      if (req.method === 'POST' && url.pathname === '/api/generate') return await handleGenerate(req, env, url);
+      if (url.pathname.startsWith('/sub/')) return await handleSub(url, env);
+      return await env.ASSETS.fetch(req);
+    } catch (e) { return json({ ok: false, error: e.message }, 500); }
+  }
 };
 
-const CLASH_RULES = \`
+const CLASH_RULES = `
   - DOMAIN-SUFFIX,acl4.ssr,🎯 全球直连
   - DOMAIN-SUFFIX,ip6-localhost,🎯 全球直连
   - DOMAIN-SUFFIX,ip6-loopback,🎯 全球直连
