@@ -13,4 +13,4 @@ run_worker_first = ["/api/*", "/sub/*"]
 # For local dev (`wrangler dev`), wrangler auto-creates a local KV store.
 [[kv_namespaces]]
 binding = "SUB_STORE"
-id = "placeholder-set-in-dashboard"
+id = "67434648dfc843019eeeb2db62f7b309"
