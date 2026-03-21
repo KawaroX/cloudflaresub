@@ -8,3 +8,9 @@ directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = ["/api/*", "/sub/*"]
+
+# KV binding – the actual namespace ID is set per-environment in the Cloudflare dashboard.
+# For local dev (`wrangler dev`), wrangler auto-creates a local KV store.
+[[kv_namespaces]]
+binding = "SUB_STORE"
+id = "placeholder-set-in-dashboard"

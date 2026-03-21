@@ -8,8 +8,8 @@ function json(data, status = 200) {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'GET,POST,OPTIONS',
-      'access-control-allow-headers': 'content-type',
+      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+      'access-control-allow-headers': 'content-type,authorization',
     },
   });
 }
@@ -225,10 +225,16 @@ function parseUrlLike(link, type) {
   const server = sanitizeLabel(u.hostname);
   const port = Number(u.port || 443);
   const network = sanitizeLabel(u.searchParams.get('type') || 'tcp');
-  const tls = sanitizeLabel(u.searchParams.get('security') || '').toLowerCase() === 'tls';
+  const security = sanitizeLabel(u.searchParams.get('security') || '').toLowerCase();
+  const tls = security === 'tls' || security === 'reality';
   const host = sanitizeLabel(u.searchParams.get('host') || u.searchParams.get('sni') || '');
   const path = sanitizeLabel(u.searchParams.get('path') || '/') || '/';
   const sni = sanitizeLabel(u.searchParams.get('sni') || u.searchParams.get('host') || '');
+  const fp = sanitizeLabel(u.searchParams.get('fp') || '');
+  const flow = sanitizeLabel(u.searchParams.get('flow') || '');
+  const serviceName = sanitizeLabel(u.searchParams.get('serviceName') || '');
+  const pbk = sanitizeLabel(u.searchParams.get('pbk') || '');
+  const sid = sanitizeLabel(u.searchParams.get('sid') || '');
   return {
     type,
     name,
@@ -238,9 +244,15 @@ function parseUrlLike(link, type) {
     uuid: type === 'vless' ? sanitizeLabel(decodeURIComponent(u.username)) : undefined,
     network,
     tls,
+    security,
     host,
     path,
     sni,
+    fp,
+    flow,
+    serviceName,
+    pbk,
+    sid,
   };
 }
 
@@ -287,10 +299,24 @@ function buildNodes(baseNodes, preferredEndpoints, options = {}) {
 }
 
 function encodeVmess(n) { return 'vmess://' + b64EncodeUtf8(JSON.stringify({ v: '2', ps: n.name, add: n.server, port: String(n.port), id: n.uuid, aid: '0', scy: n.cipher || 'auto', net: n.network || 'ws', type: 'none', host: n.host || '', path: n.path || '/', tls: n.tls ? 'tls' : '', sni: n.sni || '' })); }
-function encodeVless(n) { const u = new URL('vless://' + n.uuid + '@' + n.server + ':' + n.port); u.searchParams.set('type', n.network || 'ws'); if (n.tls) u.searchParams.set('security', 'tls'); if (n.host) u.searchParams.set('host', n.host); if (n.path) u.searchParams.set('path', n.path); u.hash = n.name; return u.toString(); }
+function encodeVless(n) {
+  const u = new URL('vless://' + n.uuid + '@' + n.server + ':' + n.port);
+  u.searchParams.set('type', n.network || 'ws');
+  if (n.tls || n.security === 'reality') u.searchParams.set('security', n.security || 'tls');
+  if (n.host) u.searchParams.set('host', n.host);
+  if (n.path) u.searchParams.set('path', n.path);
+  if (n.sni) u.searchParams.set('sni', n.sni);
+  if (n.fp) u.searchParams.set('fp', n.fp);
+  if (n.flow) u.searchParams.set('flow', n.flow);
+  if (n.serviceName) u.searchParams.set('serviceName', n.serviceName);
+  if (n.pbk) u.searchParams.set('pbk', n.pbk);
+  if (n.sid) u.searchParams.set('sid', n.sid);
+  u.hash = n.name;
+  return u.toString();
+}
 function encodeTrojan(n) { const u = new URL('trojan://' + n.password + '@' + n.server + ':' + n.port); u.searchParams.set('type', n.network || 'ws'); if (n.tls) u.searchParams.set('security', 'tls'); if (n.host) u.searchParams.set('host', n.host); u.hash = n.name; return u.toString(); }
 
-function renderRaw(nodes) { return b64EncodeUtf8(nodes.map(n => n.type==='vmess'?encodeVmess(n):n.type==='vless'?encodeVless(n):encodeTrojan(n)).filter(Boolean).join('\n')); }
+function renderRaw(nodes) { return b64EncodeUtf8(nodes.map(n => n.type==='vmess'?encodeVmess(n):n.type==='vless'?encodeVless(n):n.type==='trojan'?encodeTrojan(n):'').filter(Boolean).join('\n')); }
 
 function sanitizeForYamlValue(value) {
   return stripControlChars(value).trim();
@@ -305,7 +331,6 @@ function normalizeClashRulesText(text) {
   }
 
   // Some rule sources were pasted from a JS template string and accidentally kept the terminator line.
-  // Example tail: `\n`;\n`
   while (lines.length && /^`[;]?$/.test(lines.at(-1).trim())) {
     lines.pop();
   }
@@ -324,6 +349,18 @@ function renderClashProxyYaml(node) {
   lines.push(`    server: ${yamlQuote(sanitizeForYamlValue(node.server))}`);
   lines.push(`    port: ${Number(node.port) || 443}`);
   lines.push('    udp: true');
+
+  // Hysteria2 has a distinct format
+  if (node.type === 'hysteria2') {
+    lines.push(`    password: ${yamlQuote(sanitizeForYamlValue(node.password))}`);
+    const hy2Sni = sanitizeForYamlValue(node.sni || '');
+    if (hy2Sni) {
+      lines.push(`    sni: ${yamlQuote(hy2Sni)}`);
+    }
+    lines.push(`    skip-cert-verify: ${node.skipCertVerify !== false ? 'true' : 'false'}`);
+    return lines;
+  }
+
   lines.push('    skip-cert-verify: true');
 
   if (node.type === 'vmess') {
@@ -332,15 +369,27 @@ function renderClashProxyYaml(node) {
     lines.push(`    cipher: ${yamlQuote(sanitizeForYamlValue(node.cipher || 'auto'))}`);
   } else if (node.type === 'vless') {
     lines.push(`    uuid: ${yamlQuote(sanitizeForYamlValue(node.uuid))}`);
+    lines.push('    xudp: true');
+    if (node.flow) {
+      lines.push(`    flow: ${yamlQuote(sanitizeForYamlValue(node.flow))}`);
+    }
   } else if (node.type === 'trojan') {
     lines.push(`    password: ${yamlQuote(sanitizeForYamlValue(node.password))}`);
   }
 
-  if (node.tls) {
+  if (node.tls || node.security === 'reality') {
     lines.push('    tls: true');
     const servername = sanitizeForYamlValue(node.sni || '');
     if (servername) {
       lines.push(`    servername: ${yamlQuote(servername)}`);
+    }
+    if (node.fp) {
+      lines.push(`    client-fingerprint: ${yamlQuote(sanitizeForYamlValue(node.fp))}`);
+    }
+    if (node.security === 'reality') {
+      lines.push('    reality-opts:');
+      lines.push(`      public-key: ${yamlQuote(sanitizeForYamlValue(node.pbk || ''))}`);
+      lines.push(`      short-id: ${yamlQuote(sanitizeForYamlValue(node.sid || ''))}`);
     }
   } else {
     lines.push('    tls: false');
@@ -357,17 +406,33 @@ function renderClashProxyYaml(node) {
       lines.push('      headers:');
       lines.push(`        Host: ${yamlQuote(host)}`);
     }
+  } else if (network === 'grpc') {
+    lines.push('    grpc-opts:');
+    lines.push(`      grpc-service-name: ${yamlQuote(sanitizeForYamlValue(node.serviceName || ''))}`);
   }
 
   return lines;
 }
 
-function renderClash(nodes) {
-  // NOTE: CLASH_RULES_B64 is base64(UTF-8 text). Using atob() directly yields a "binary string"
-  // that can introduce C1 control chars (U+0080..U+009F) after re-encoding, breaking YAML parsers.
+function renderClash(cdnNodes, { extraNodes = [], extraNodesYaml = '' } = {}) {
   const CLASH_RULES = normalizeClashRulesText(b64DecodeUtf8(CLASH_RULES_B64));
-  const safeNodes = Array.isArray(nodes) ? nodes : [];
-  const names = safeNodes.map((n) => sanitizeForYamlValue(n.name)).filter(Boolean);
+  const safeCdnNodes = Array.isArray(cdnNodes) ? cdnNodes : [];
+  const safeExtraNodes = Array.isArray(extraNodes) ? extraNodes : [];
+  const cdnNames = safeCdnNodes.map((n) => sanitizeForYamlValue(n.name)).filter(Boolean);
+
+  // Collect extra node names from rendered extra nodes
+  const extraNodeNames = safeExtraNodes.map((n) => sanitizeForYamlValue(n.name)).filter(Boolean);
+
+  // Parse names from shared raw YAML (e.g. hy2 nodes)
+  const sharedNames = [];
+  if (extraNodesYaml) {
+    for (const line of extraNodesYaml.split('\n')) {
+      const m = line.match(/^\s*-\s*name:\s*"([^"]+)"/);
+      if (m) sharedNames.push(m[1]);
+    }
+  }
+  const allExtraNames = [...extraNodeNames, ...sharedNames];
+  const allNames = [...cdnNames, ...allExtraNames];
 
   const yamlArray = (values) => `[${values.map((v) => yamlQuote(v)).join(', ')}]`;
 
@@ -380,35 +445,43 @@ function renderClash(nodes) {
   lines.push('global-client-fingerprint: chrome');
   lines.push('');
   lines.push('proxies:');
-  safeNodes.forEach((node) => {
+  safeCdnNodes.forEach((node) => {
     lines.push(...renderClashProxyYaml(node));
   });
+  safeExtraNodes.forEach((node) => {
+    lines.push(...renderClashProxyYaml(node));
+  });
+  if (extraNodesYaml) {
+    lines.push(extraNodesYaml.trimEnd());
+  }
   lines.push('');
   lines.push('proxy-groups:');
+  // 节点选择 and 自动选择 include ALL nodes (CDN + extra)
   lines.push(`  - name: ${yamlQuote('🚀 节点选择')}`);
   lines.push('    type: select');
-  lines.push(`    proxies: ${yamlArray(['♻️ 自动选择', 'DIRECT', ...names])}`);
+  lines.push(`    proxies: ${yamlArray(['♻️ 自动选择', 'DIRECT', ...allNames])}`);
   lines.push(`  - name: ${yamlQuote('♻️ 自动选择')}`);
   lines.push('    type: url-test');
   lines.push(`    url: ${yamlQuote('http://www.gstatic.com/generate_204')}`);
   lines.push('    interval: 300');
   lines.push('    tolerance: 50');
-  lines.push(`    proxies: ${yamlArray(names)}`);
+  lines.push(`    proxies: ${yamlArray(allNames)}`);
+  // Other groups only include CDN nodes
   lines.push(`  - name: ${yamlQuote('🌍 国外媒体')}`);
   lines.push('    type: select');
-  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '♻️ 自动选择', '🎯 全球直连', ...names])}`);
+  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '♻️ 自动选择', '🎯 全球直连', ...cdnNames])}`);
   lines.push(`  - name: ${yamlQuote('📲 电报信息')}`);
   lines.push('    type: select');
-  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '🎯 全球直连', ...names])}`);
+  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '🎯 全球直连', ...cdnNames])}`);
   lines.push(`  - name: ${yamlQuote('Ⓜ️ 微软服务')}`);
   lines.push('    type: select');
-  lines.push(`    proxies: ${yamlArray(['🎯 全球直连', '🚀 节点选择', ...names])}`);
+  lines.push(`    proxies: ${yamlArray(['🎯 全球直连', '🚀 节点选择', ...cdnNames])}`);
   lines.push(`  - name: ${yamlQuote('🍎 苹果服务')}`);
   lines.push('    type: select');
-  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '🎯 全球直连', ...names])}`);
+  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '🎯 全球直连', ...cdnNames])}`);
   lines.push(`  - name: ${yamlQuote('📢 谷歌FCM')}`);
   lines.push('    type: select');
-  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '🎯 全球直连', '♻️ 自动选择', ...names])}`);
+  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '🎯 全球直连', '♻️ 自动选择', ...cdnNames])}`);
   lines.push(`  - name: ${yamlQuote('🎯 全球直连')}`);
   lines.push('    type: select');
   lines.push(`    proxies: ${yamlArray(['DIRECT', '🚀 节点选择', '♻️ 自动选择'])}`);
@@ -420,7 +493,7 @@ function renderClash(nodes) {
   lines.push(`    proxies: ${yamlArray(['REJECT', 'DIRECT'])}`);
   lines.push(`  - name: ${yamlQuote('🐟 漏网之鱼')}`);
   lines.push('    type: select');
-  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '🎯 全球直连', '♻️ 自动选择', ...names])}`);
+  lines.push(`    proxies: ${yamlArray(['🚀 节点选择', '🎯 全球直连', '♻️ 自动选择', ...cdnNames])}`);
   lines.push('');
   lines.push('rules:');
   lines.push(CLASH_RULES.trimEnd());
@@ -439,6 +512,172 @@ function createShortId(len = 10) {
   const b = crypto.getRandomValues(new Uint8Array(len));
   return Array.from(b).map(x => c[x % c.length]).join('');
 }
+
+// --- Dynamic subscription assembly ---
+
+function assembleNodesForProfile(profile, globalConfig) {
+  let cdnNodes = [];
+  try {
+    const baseNodes = parseRawLinks(profile.wsNodeLink || '');
+    const eps = parsePreferredEndpoints(globalConfig.preferredIps || '');
+    if (baseNodes.length && eps.length) {
+      cdnNodes = buildNodes(baseNodes, eps, {
+        keepOriginalHost: profile.keepOriginalHost !== false,
+        addFlagEmoji: profile.addFlagEmoji === true,
+      });
+    }
+  } catch (e) {
+    // ws nodes or preferred IPs missing/invalid — CDN nodes will be empty
+  }
+
+  const extraNodes = [];
+  for (const tpl of (globalConfig.extraNodeTemplates || [])) {
+    const uuid = tpl.uuidPerUser ? (profile.extraUuids?.[tpl.id] || '') : '';
+    if (tpl.uuidPerUser && !uuid) continue;
+
+    const flagEmoji = codeToFlagEmoji(tpl.countryCode || 'US');
+    const name = flagEmoji ? `${flagEmoji} ${tpl.nameLabel}` : tpl.nameLabel;
+
+    extraNodes.push({
+      type: tpl.type || 'vless',
+      name,
+      server: tpl.server,
+      port: tpl.port,
+      uuid,
+      network: tpl.network || 'tcp',
+      tls: true,
+      security: tpl.security || 'reality',
+      sni: tpl.servername || '',
+      fp: tpl.fp || 'chrome',
+      pbk: tpl.publicKey || '',
+      sid: tpl.shortId || '',
+      flow: tpl.flow || '',
+      serviceName: tpl.serviceName || '',
+    });
+  }
+
+  return {
+    cdnNodes,
+    extraNodes,
+    extraNodesYaml: globalConfig.sharedExtraNodesYaml || '',
+  };
+}
+
+// --- Admin API helpers ---
+
+function checkAdminAuth(req, env) {
+  if (!env.SUB_ACCESS_TOKEN) return true;
+  const url = new URL(req.url);
+  const token = url.searchParams.get('token')
+    || req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+  return token === String(env.SUB_ACCESS_TOKEN).trim();
+}
+
+async function handleAdminGetConfig(req, env) {
+  if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
+  const raw = await env.SUB_STORE.get('config:global');
+  return json({ ok: true, config: raw ? JSON.parse(raw) : {} });
+}
+
+async function handleAdminPutConfig(req, env) {
+  if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
+  const body = await req.json();
+  const config = body.config || body;
+  await env.SUB_STORE.put('config:global', JSON.stringify(config));
+  return json({ ok: true });
+}
+
+async function handleAdminGetProfiles(req, env) {
+  if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
+  const configRaw = await env.SUB_STORE.get('config:global');
+  const config = configRaw ? JSON.parse(configRaw) : {};
+  const profileIds = config.profileIds || [];
+  const profiles = [];
+  for (const id of profileIds) {
+    const raw = await env.SUB_STORE.get('profile:' + id);
+    if (raw) profiles.push({ id, ...JSON.parse(raw) });
+  }
+  return json({ ok: true, profiles });
+}
+
+async function handleAdminPostProfile(req, env, url) {
+  if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
+  const body = await req.json();
+  const profileId = sanitizeLabel(body.id) || createShortId(8);
+
+  // Read existing profile to preserve subId if updating
+  const existingRaw = await env.SUB_STORE.get('profile:' + profileId);
+  const existing = existingRaw ? JSON.parse(existingRaw) : {};
+
+  const profile = {
+    name: sanitizeLabel(body.name || ''),
+    wsNodeLink: (body.wsNodeLink || '').trim(),
+    extraUuids: body.extraUuids || {},
+    subId: existing.subId || sanitizeLabel(body.subId) || createShortId(),
+    subscriptionName: sanitizeLabel(body.subscriptionName || ''),
+    keepOriginalHost: body.keepOriginalHost !== false,
+    addFlagEmoji: body.addFlagEmoji === true,
+  };
+
+  await env.SUB_STORE.put('profile:' + profileId, JSON.stringify(profile));
+  // Create/update sub pointer
+  await env.SUB_STORE.put('sub:' + profile.subId, JSON.stringify({ profileId }));
+
+  // Update profileIds list in global config
+  const configRaw = await env.SUB_STORE.get('config:global');
+  const config = configRaw ? JSON.parse(configRaw) : {};
+  const ids = new Set(config.profileIds || []);
+  ids.add(profileId);
+  config.profileIds = [...ids];
+  await env.SUB_STORE.put('config:global', JSON.stringify(config));
+
+  // Build subscription URL
+  const hasAccessToken = Boolean(env.SUB_ACCESS_TOKEN && String(env.SUB_ACCESS_TOKEN).trim());
+  const buildSubUrl = (target) => {
+    const link = new URL(url.origin + '/sub/' + profile.subId);
+    if (hasAccessToken) link.searchParams.set('token', String(env.SUB_ACCESS_TOKEN).trim());
+    if (target) link.searchParams.set('target', target);
+    if (profile.subscriptionName) link.searchParams.set('filename', profile.subscriptionName);
+    return link.toString();
+  };
+
+  return json({
+    ok: true,
+    profileId,
+    profile,
+    urls: {
+      auto: buildSubUrl(''),
+      clash: buildSubUrl('clash'),
+      surge: buildSubUrl('surge'),
+    },
+  });
+}
+
+async function handleAdminDeleteProfile(req, env) {
+  if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
+  const url = new URL(req.url);
+  const profileId = url.pathname.split('/').pop();
+
+  // Read profile to get subId for cleanup
+  const profileRaw = await env.SUB_STORE.get('profile:' + profileId);
+  if (profileRaw) {
+    const profile = JSON.parse(profileRaw);
+    if (profile.subId) {
+      await env.SUB_STORE.delete('sub:' + profile.subId);
+    }
+  }
+  await env.SUB_STORE.delete('profile:' + profileId);
+
+  // Remove from profileIds list
+  const configRaw = await env.SUB_STORE.get('config:global');
+  const config = configRaw ? JSON.parse(configRaw) : {};
+  config.profileIds = (config.profileIds || []).filter(id => id !== profileId);
+  await env.SUB_STORE.put('config:global', JSON.stringify(config));
+
+  return json({ ok: true });
+}
+
+// --- Original generate handler (unchanged) ---
 
 async function handleGenerate(req, env, url) {
   try {
@@ -492,6 +731,8 @@ async function handleGenerate(req, env, url) {
   } catch(e) { return json({ ok: false, error: e.message }, 500); }
 }
 
+// --- Subscription handler (supports both old static and new dynamic modes) ---
+
 async function handleSub(url, env) {
   const token = url.searchParams.get('token');
   if (env.SUB_ACCESS_TOKEN && token !== env.SUB_ACCESS_TOKEN) return text('Forbidden', 403);
@@ -499,24 +740,54 @@ async function handleSub(url, env) {
   const raw = await env.SUB_STORE.get('sub:' + id);
   if (!raw) return text('Not Found', 404);
   await env.SUB_STORE.put('sub:' + id, raw); // 自动续命
-  const { nodes } = JSON.parse(raw);
+  const data = JSON.parse(raw);
   const target = url.searchParams.get('target') || 'raw';
   const requestedName = url.searchParams.get('filename') || url.searchParams.get('name') || '';
   const ext = target === 'clash' ? '.yaml' : target === 'surge' ? '.conf' : '.txt';
-  const filename = ensureExtension(requestedName || 'subscription', ext);
+
+  let cdnNodes, extraNodes = [], extraNodesYaml = '', subscriptionName = '';
+
+  if (data.profileId) {
+    // New dynamic mode: assemble nodes from profile + global config
+    const [profileRaw, configRaw] = await Promise.all([
+      env.SUB_STORE.get('profile:' + data.profileId),
+      env.SUB_STORE.get('config:global'),
+    ]);
+    if (!profileRaw) return text('Profile not found', 404);
+    const profile = JSON.parse(profileRaw);
+    const globalConfig = configRaw ? JSON.parse(configRaw) : {};
+    const assembled = assembleNodesForProfile(profile, globalConfig);
+    cdnNodes = assembled.cdnNodes;
+    extraNodes = assembled.extraNodes;
+    extraNodesYaml = assembled.extraNodesYaml;
+    subscriptionName = profile.subscriptionName || '';
+  } else {
+    // Old static mode (backward compatible)
+    cdnNodes = data.nodes || [];
+  }
+
+  const filename = ensureExtension(requestedName || subscriptionName || 'subscription', ext);
   const headers = { 'content-disposition': buildContentDisposition(filename) };
 
-  if (target === 'clash') return text(renderClash(nodes), 200, 'text/yaml; charset=utf-8', headers);
-  if (target === 'surge') return text(renderSurge(nodes), 200, 'text/plain; charset=utf-8', headers);
-  return text(renderRaw(nodes), 200, 'text/plain; charset=utf-8', headers);
+  if (target === 'clash') return text(renderClash(cdnNodes, { extraNodes, extraNodesYaml }), 200, 'text/yaml; charset=utf-8', headers);
+  if (target === 'surge') return text(renderSurge(cdnNodes), 200, 'text/plain; charset=utf-8', headers);
+  // For raw format, include CDN + extra nodes (shared YAML is Clash-specific)
+  const allNodes = [...cdnNodes, ...extraNodes];
+  return text(renderRaw(allNodes), 200, 'text/plain; charset=utf-8', headers);
 }
 
 export default {
   async fetch(req, env) {
     try {
       const url = new URL(req.url);
-      if (req.method === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type' } });
+      if (req.method === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS', 'access-control-allow-headers': 'content-type,authorization' } });
       if (req.method === 'POST' && url.pathname === '/api/generate') return await handleGenerate(req, env, url);
+      // Admin API
+      if (url.pathname === '/api/admin/config' && req.method === 'GET') return await handleAdminGetConfig(req, env);
+      if (url.pathname === '/api/admin/config' && req.method === 'PUT') return await handleAdminPutConfig(req, env);
+      if (url.pathname === '/api/admin/profiles' && req.method === 'GET') return await handleAdminGetProfiles(req, env);
+      if (url.pathname === '/api/admin/profiles' && req.method === 'POST') return await handleAdminPostProfile(req, env, url);
+      if (url.pathname.startsWith('/api/admin/profiles/') && req.method === 'DELETE') return await handleAdminDeleteProfile(req, env);
       if (url.pathname.startsWith('/sub/')) return await handleSub(url, env);
       return await env.ASSETS.fetch(req);
     } catch (e) { return json({ ok: false, error: e.message }, 500); }
