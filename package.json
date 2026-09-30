@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node tests/smoke.mjs"
+    "check": "node tests/smoke.mjs && node tests/profile-nodes.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
   }
 }

@@ -1,0 +1,48 @@
+.hero { grid-template-columns: 1fr; }
+.admin-section { padding: 24px; margin-bottom: 24px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.section-heading h2, .section-heading h3 { margin: 0; }
+.form-group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.form-group label { font-size: .9rem; font-weight: 500; margin: 0; }
+.form-group input, .form-group textarea, .form-group select, .profile-url-row input { width: 100%; min-width: 0; border: 1px solid var(--line); background: rgba(15,23,42,.9); color: var(--text); border-radius: 10px; padding: 10px 12px; font: inherit; }
+textarea { resize: vertical; overflow-wrap: anywhere; font-family: ui-monospace, monospace !important; font-size: .85rem !important; line-height: 1.6; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input:disabled, select:disabled, button:disabled { opacity: .55; cursor: not-allowed; }
+.form-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+.auth-bar { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 12px; margin-bottom: 20px; }
+.profile-card, .node-card { padding: 18px; border: 1px solid var(--line); border-radius: 16px; margin-bottom: 16px; background: rgba(255,255,255,.02); min-width: 0; }
+.profile-card.active { border-color: var(--accent); }
+.profile-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.profile-header h3 { margin: 0; overflow-wrap: anywhere; }
+.profile-header .actions { margin: 0; }
+.profile-url-row { display: grid; grid-template-columns: 76px minmax(0,1fr) auto; align-items: center; gap: 10px; margin: 8px 0; }
+.profile-url-row label, .muted { color: var(--muted); font-size: .85rem; }
+.badge { border: 1px solid var(--line); border-radius: 20px; padding: 5px 10px; font-size: .8rem; color: var(--muted); }
+.btn-danger { color: var(--danger); border: 1px solid rgba(248,113,113,.25); background: rgba(248,113,113,.08); }
+.divider { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+.node-options { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin: 14px 0 8px; }
+.check-label { display: flex; gap: 8px; align-items: center; margin: 0; }
+.check-label input { width: 18px; height: 18px; accent-color: var(--accent); }
+.count-settings { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.count-settings select, .count-settings input { padding: 8px; border-radius: 8px; border: 1px solid var(--line); color: var(--text); background: var(--bg); font: inherit; }
+.count-settings input { width: 85px; }
+.node-summary { color: var(--accent-2); font-size: .85rem; line-height: 1.6; margin: 0; }
+.status-msg { padding: 12px 14px; border-radius: 10px; margin: 12px 0; overflow-wrap: anywhere; }
+.status-msg.success { color: #bbf7d0; background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.25); }
+.status-msg.error { color: #fca5a5; background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.25); }
+.status-msg.warning { color: #fde68a; background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.25); }
+.editor-actions { margin-top: 22px; }
+.preview-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.preview-table th, .preview-table td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; overflow-wrap: anywhere; }
+.table-scroll { overflow-x: auto; }
+#preview { margin-top: 24px; }
+[hidden] { display: none !important; }
+@media (max-width: 640px) {
+  .admin-section { padding: 18px; }
+  .form-row, .auth-bar { grid-template-columns: 1fr; }
+  .profile-url-row { grid-template-columns: minmax(0,1fr) auto; }
+  .profile-url-row label { grid-column: 1 / -1; }
+  .node-options { align-items: flex-start; flex-direction: column; }
+  .hero-title { flex-wrap: wrap; }
+  .editor-actions button { flex: 1 1 100%; }
+}
