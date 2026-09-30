@@ -1,5 +1,8 @@
 
 import { CLASH_RULES_B64 } from "./rules.js";
+import { stringify } from 'yaml';
+import { detectTarget, parseNodeLinks, renderSurgeSubscription } from './core.js';
+import { ConfigError, importNodes, assembleProfile, parsePreferredIps, renderProfileRaw, yamlProxyList } from './profile-nodes.js';
 
 // Cloudflare Worker: KV short link subscription
 function json(data, status = 200) {
@@ -414,25 +417,11 @@ function renderClashProxyYaml(node) {
   return lines;
 }
 
-function renderClash(cdnNodes, { extraNodes = [], extraNodesYaml = '' } = {}) {
+function renderClash(cdnNodes, { clashProxies = null } = {}) {
   const CLASH_RULES = normalizeClashRulesText(b64DecodeUtf8(CLASH_RULES_B64));
   const safeCdnNodes = Array.isArray(cdnNodes) ? cdnNodes : [];
-  const safeExtraNodes = Array.isArray(extraNodes) ? extraNodes : [];
-  const cdnNames = safeCdnNodes.map((n) => sanitizeForYamlValue(n.name)).filter(Boolean);
-
-  // Collect extra node names from rendered extra nodes
-  const extraNodeNames = safeExtraNodes.map((n) => sanitizeForYamlValue(n.name)).filter(Boolean);
-
-  // Parse names from shared raw YAML (e.g. hy2 nodes)
-  const sharedNames = [];
-  if (extraNodesYaml) {
-    for (const line of extraNodesYaml.split('\n')) {
-      const m = line.match(/^\s*-\s*name:\s*"([^"]+)"/);
-      if (m) sharedNames.push(m[1]);
-    }
-  }
-  const allExtraNames = [...extraNodeNames, ...sharedNames];
-  const allNames = [...cdnNames, ...allExtraNames];
+  const cdnNames = (clashProxies || safeCdnNodes).map(n => sanitizeForYamlValue(n.name)).filter(Boolean);
+  const allNames = cdnNames.length ? cdnNames : ['DIRECT'];
 
   const yamlArray = (values) => `[${values.map((v) => yamlQuote(v)).join(', ')}]`;
 
@@ -445,14 +434,11 @@ function renderClash(cdnNodes, { extraNodes = [], extraNodesYaml = '' } = {}) {
   lines.push('global-client-fingerprint: chrome');
   lines.push('');
   lines.push('proxies:');
-  safeCdnNodes.forEach((node) => {
-    lines.push(...renderClashProxyYaml(node));
-  });
-  safeExtraNodes.forEach((node) => {
-    lines.push(...renderClashProxyYaml(node));
-  });
-  if (extraNodesYaml) {
-    lines.push(extraNodesYaml.trimEnd());
+  if (clashProxies) {
+    if (clashProxies.length) lines.push(yamlProxyList(clashProxies));
+    else lines[lines.length - 1] = 'proxies: []';
+  } else {
+    safeCdnNodes.forEach(node => lines.push(...renderClashProxyYaml(node)));
   }
   lines.push('');
   lines.push('proxy-groups:');
@@ -513,57 +499,7 @@ function createShortId(len = 10) {
   return Array.from(b).map(x => c[x % c.length]).join('');
 }
 
-// --- Dynamic subscription assembly ---
-
-function assembleNodesForProfile(profile, globalConfig) {
-  let cdnNodes = [];
-  try {
-    const baseNodes = parseRawLinks(profile.wsNodeLink || '');
-    const eps = parsePreferredEndpoints(globalConfig.preferredIps || '');
-    if (baseNodes.length && eps.length) {
-      cdnNodes = buildNodes(baseNodes, eps, {
-        keepOriginalHost: profile.keepOriginalHost !== false,
-        addFlagEmoji: profile.addFlagEmoji === true,
-      });
-    }
-  } catch (e) {
-    // ws nodes or preferred IPs missing/invalid — CDN nodes will be empty
-  }
-
-  const extraNodes = [];
-  for (const tpl of (globalConfig.extraNodeTemplates || [])) {
-    const uuid = tpl.uuidPerUser ? (profile.extraUuids?.[tpl.id] || '') : '';
-    if (tpl.uuidPerUser && !uuid) continue;
-
-    const flagEmoji = codeToFlagEmoji(tpl.countryCode || 'US');
-    const name = flagEmoji ? `${flagEmoji} ${tpl.nameLabel}` : tpl.nameLabel;
-
-    extraNodes.push({
-      type: tpl.type || 'vless',
-      name,
-      server: tpl.server,
-      port: tpl.port,
-      uuid,
-      network: tpl.network || 'tcp',
-      tls: true,
-      security: tpl.security || 'reality',
-      sni: tpl.servername || '',
-      fp: tpl.fp || 'chrome',
-      pbk: tpl.publicKey || '',
-      sid: tpl.shortId || '',
-      flow: tpl.flow || '',
-      serviceName: tpl.serviceName || '',
-    });
-  }
-
-  return {
-    cdnNodes,
-    extraNodes,
-    extraNodesYaml: globalConfig.sharedExtraNodesYaml || '',
-  };
-}
-
-// --- Admin API helpers ---
+// --- Per-user subscriptions and migration ---
 
 function checkAdminAuth(req, env) {
   if (!env.SUB_ACCESS_TOKEN) return true;
@@ -573,107 +509,155 @@ function checkAdminAuth(req, env) {
   return token === String(env.SUB_ACCESS_TOKEN).trim();
 }
 
+function legacySources(profile, config) {
+  if (Array.isArray(profile.nodeSources)) return profile.nodeSources;
+  const sources = [];
+  if (profile.wsNodeLink?.trim()) {
+    sources.push(...importNodes('link', profile.wsNodeLink).map(source => ({ ...source, usePreferredIps: true })));
+  }
+  for (const tpl of config.extraNodeTemplates || []) {
+    const uuid = tpl.uuidPerUser ? profile.extraUuids?.[tpl.id] : tpl.uuid;
+    if (tpl.uuidPerUser && !uuid) continue;
+    const flag = codeToFlagEmoji(tpl.countryCode || 'US');
+    const node = {
+      name: [flag, tpl.nameLabel || tpl.id].filter(Boolean).join(' '),
+      type: tpl.type || 'vless', server: tpl.server, port: Number(tpl.port || 443),
+      uuid: uuid || '', network: tpl.network || 'tcp', tls: true, udp: true,
+      servername: tpl.servername || '', 'client-fingerprint': tpl.fp || 'chrome',
+      'skip-cert-verify': true,
+    };
+    if ((tpl.security || 'reality') === 'reality') node['reality-opts'] = { 'public-key': tpl.publicKey || '', 'short-id': tpl.shortId || '' };
+    if (tpl.flow) node.flow = tpl.flow;
+    if (node.network === 'grpc') node['grpc-opts'] = { 'grpc-service-name': tpl.serviceName || '' };
+    sources.push(...importNodes('yaml', stringify(node)));
+  }
+  for (const content of [config.sharedExtraNodesYaml, profile.extraNodesYaml]) {
+    if (content?.trim()) sources.push(...importNodes('yaml', content));
+  }
+  return sources;
+}
+
+async function readConfig(env) {
+  const raw = await env.SUB_STORE.get('config:global');
+  return raw ? JSON.parse(raw) : {};
+}
+
+// Admin operations materialize the old shared nodes into each existing profile.
+// Backups and version checks make retries safe; the global record is changed last.
+async function migrateConfig(env) {
+  const config = await readConfig(env);
+  if (config.schemaVersion === 2) return config;
+  const migrations = [];
+  for (const id of config.profileIds || []) {
+    const raw = await env.SUB_STORE.get('profile:' + id);
+    if (!raw) continue;
+    const profile = JSON.parse(raw);
+    if (profile.schemaVersion === 2) continue;
+    migrations.push({ id, raw, profile: { ...profile, schemaVersion: 2, nodeSources: legacySources(profile, config) } });
+  }
+  // Parse all legacy data before making any writes; invalid YAML never causes node loss.
+  if (!await env.SUB_STORE.get('backup:v1:config:global')) await env.SUB_STORE.put('backup:v1:config:global', JSON.stringify(config));
+  for (const { id, raw, profile } of migrations) {
+    if (!await env.SUB_STORE.get('backup:v1:profile:' + id)) await env.SUB_STORE.put('backup:v1:profile:' + id, raw);
+    delete profile.wsNodeLink; delete profile.extraUuids; delete profile.extraNodesYaml;
+    delete profile.keepOriginalHost; delete profile.addFlagEmoji;
+    await env.SUB_STORE.put('profile:' + id, JSON.stringify(profile));
+  }
+  const next = { schemaVersion: 2, preferredIps: config.preferredIps || '', profileIds: config.profileIds || [] };
+  await env.SUB_STORE.put('config:global', JSON.stringify(next));
+  return next;
+}
+
 async function handleAdminGetConfig(req, env) {
   if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
-  const raw = await env.SUB_STORE.get('config:global');
-  return json({ ok: true, config: raw ? JSON.parse(raw) : {} });
+  const config = await migrateConfig(env);
+  return json({ ok: true, config, preferredIpCount: parsePreferredIps(config.preferredIps).length });
 }
 
 async function handleAdminPutConfig(req, env) {
   if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
   const body = await req.json();
-  const config = body.config || body;
-  await env.SUB_STORE.put('config:global', JSON.stringify(config));
-  return json({ ok: true });
+  const preferredIps = (body.config || body).preferredIps;
+  const count = parsePreferredIps(preferredIps).length;
+  const config = await migrateConfig(env);
+  // The client cannot overwrite the server-maintained profile index.
+  const next = { ...config, preferredIps: preferredIps || '' };
+  await env.SUB_STORE.put('config:global', JSON.stringify(next));
+  return json({ ok: true, config: next, preferredIpCount: count });
 }
 
 async function handleAdminGetProfiles(req, env) {
   if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
-  const configRaw = await env.SUB_STORE.get('config:global');
-  const config = configRaw ? JSON.parse(configRaw) : {};
-  const profileIds = config.profileIds || [];
+  const config = await migrateConfig(env);
   const profiles = [];
-  for (const id of profileIds) {
+  for (const id of config.profileIds || []) {
     const raw = await env.SUB_STORE.get('profile:' + id);
-    if (raw) profiles.push({ id, ...JSON.parse(raw) });
+    if (raw) profiles.push({ ...JSON.parse(raw), id });
   }
   return json({ ok: true, profiles });
+}
+
+async function handleAdminImport(req, env) {
+  if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
+  const { format, content } = await req.json();
+  const nodeSources = importNodes(format, content);
+  return json({ ok: true, nodeSources });
+}
+
+async function handleAdminPreview(req, env) {
+  if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
+  const body = await req.json();
+  const config = await readConfig(env);
+  const result = assembleProfile(body.nodeSources, config.preferredIps || '');
+  return json({ ok: true, warnings: result.warnings, preferredIpCount: result.preferredIpCount,
+    nodes: result.nodes.map(({ proxy }) => ({ name: proxy.name, type: proxy.type, network: proxy.network || '', server: proxy.server, port: proxy.port })) });
 }
 
 async function handleAdminPostProfile(req, env, url) {
   if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
   const body = await req.json();
   const profileId = sanitizeLabel(body.id) || createShortId(8);
-
-  // Read existing profile to preserve subId if updating
+  const config = await migrateConfig(env);
   const existingRaw = await env.SUB_STORE.get('profile:' + profileId);
   const existing = existingRaw ? JSON.parse(existingRaw) : {};
-
+  const sources = body.nodeSources ?? existing.nodeSources ?? legacySources(body, {});
+  const assembled = assembleProfile(sources, config.preferredIps || '');
   const profile = {
-    name: sanitizeLabel(body.name || ''),
-    wsNodeLink: (body.wsNodeLink || '').trim(),
-    extraUuids: body.extraUuids || {},
-    subId: existing.subId || sanitizeLabel(body.subId) || createShortId(),
-    subscriptionName: sanitizeLabel(body.subscriptionName || ''),
-    keepOriginalHost: body.keepOriginalHost !== false,
-    addFlagEmoji: body.addFlagEmoji === true,
+    schemaVersion: 2,
+    name: sanitizeLabel(body.name ?? existing.name ?? ''),
+    subscriptionName: sanitizeLabel(body.subscriptionName ?? existing.subscriptionName ?? ''),
+    subId: existing.subId || createShortId(),
+    nodeSources: assembled.sources,
   };
-
   await env.SUB_STORE.put('profile:' + profileId, JSON.stringify(profile));
-  // Create/update sub pointer
   await env.SUB_STORE.put('sub:' + profile.subId, JSON.stringify({ profileId }));
-
-  // Update profileIds list in global config
-  const configRaw = await env.SUB_STORE.get('config:global');
-  const config = configRaw ? JSON.parse(configRaw) : {};
-  const ids = new Set(config.profileIds || []);
-  ids.add(profileId);
-  config.profileIds = [...ids];
-  await env.SUB_STORE.put('config:global', JSON.stringify(config));
-
-  // Build subscription URL
-  const hasAccessToken = Boolean(env.SUB_ACCESS_TOKEN && String(env.SUB_ACCESS_TOKEN).trim());
-  const buildSubUrl = (target) => {
+  const latestConfig = await readConfig(env);
+  latestConfig.profileIds = [...new Set([...(latestConfig.profileIds || []), profileId])];
+  await env.SUB_STORE.put('config:global', JSON.stringify(latestConfig));
+  const buildSubUrl = target => {
     const link = new URL(url.origin + '/sub/' + profile.subId);
-    if (hasAccessToken) link.searchParams.set('token', String(env.SUB_ACCESS_TOKEN).trim());
+    if (env.SUB_ACCESS_TOKEN) link.searchParams.set('token', String(env.SUB_ACCESS_TOKEN).trim());
     if (target) link.searchParams.set('target', target);
     if (profile.subscriptionName) link.searchParams.set('filename', profile.subscriptionName);
     return link.toString();
   };
-
-  return json({
-    ok: true,
-    profileId,
-    profile,
-    urls: {
-      auto: buildSubUrl(''),
-      clash: buildSubUrl('clash'),
-      surge: buildSubUrl('surge'),
-    },
-  });
+  return json({ ok: true, profileId, profile, warnings: assembled.warnings,
+    urls: { auto: buildSubUrl(''), clash: buildSubUrl('clash'), raw: buildSubUrl('raw'), surge: buildSubUrl('surge') } });
 }
 
 async function handleAdminDeleteProfile(req, env) {
   if (!checkAdminAuth(req, env)) return json({ ok: false, error: 'Forbidden' }, 403);
-  const url = new URL(req.url);
-  const profileId = url.pathname.split('/').pop();
-
-  // Read profile to get subId for cleanup
-  const profileRaw = await env.SUB_STORE.get('profile:' + profileId);
-  if (profileRaw) {
-    const profile = JSON.parse(profileRaw);
-    if (profile.subId) {
-      await env.SUB_STORE.delete('sub:' + profile.subId);
-    }
+  const profileId = decodeURIComponent(new URL(req.url).pathname.split('/').pop());
+  await migrateConfig(env);
+  const raw = await env.SUB_STORE.get('profile:' + profileId);
+  if (raw) {
+    const profile = JSON.parse(raw);
+    if (profile.subId) await env.SUB_STORE.delete('sub:' + profile.subId);
   }
   await env.SUB_STORE.delete('profile:' + profileId);
-
-  // Remove from profileIds list
-  const configRaw = await env.SUB_STORE.get('config:global');
-  const config = configRaw ? JSON.parse(configRaw) : {};
+  const config = await readConfig(env);
   config.profileIds = (config.profileIds || []).filter(id => id !== profileId);
   await env.SUB_STORE.put('config:global', JSON.stringify(config));
-
   return json({ ok: true });
 }
 
@@ -733,47 +717,41 @@ async function handleGenerate(req, env, url) {
 
 // --- Subscription handler (supports both old static and new dynamic modes) ---
 
-async function handleSub(url, env) {
+async function handleSub(req, url, env) {
   const token = url.searchParams.get('token');
-  if (env.SUB_ACCESS_TOKEN && token !== env.SUB_ACCESS_TOKEN) return text('Forbidden', 403);
+  if (env.SUB_ACCESS_TOKEN && token !== String(env.SUB_ACCESS_TOKEN).trim()) return text('Forbidden', 403);
   const id = url.pathname.split('/').pop();
   const raw = await env.SUB_STORE.get('sub:' + id);
   if (!raw) return text('Not Found', 404);
-  await env.SUB_STORE.put('sub:' + id, raw); // 自动续命
   const data = JSON.parse(raw);
-  const target = url.searchParams.get('target') || 'raw';
+  const target = detectTarget(req.headers.get('user-agent'), url.searchParams.get('target'));
   const requestedName = url.searchParams.get('filename') || url.searchParams.get('name') || '';
   const ext = target === 'clash' ? '.yaml' : target === 'surge' ? '.conf' : '.txt';
-
-  let cdnNodes, extraNodes = [], extraNodesYaml = '', subscriptionName = '';
-
+  let subscriptionName = '', nodes;
   if (data.profileId) {
-    // New dynamic mode: assemble nodes from profile + global config
-    const [profileRaw, configRaw] = await Promise.all([
-      env.SUB_STORE.get('profile:' + data.profileId),
-      env.SUB_STORE.get('config:global'),
-    ]);
+    const [profileRaw, config] = await Promise.all([env.SUB_STORE.get('profile:' + data.profileId), readConfig(env)]);
     if (!profileRaw) return text('Profile not found', 404);
     const profile = JSON.parse(profileRaw);
-    const globalConfig = configRaw ? JSON.parse(configRaw) : {};
-    const assembled = assembleNodesForProfile(profile, globalConfig);
-    cdnNodes = assembled.cdnNodes;
-    extraNodes = assembled.extraNodes;
-    extraNodesYaml = assembled.extraNodesYaml;
     subscriptionName = profile.subscriptionName || '';
-  } else {
-    // Old static mode (backward compatible)
-    cdnNodes = data.nodes || [];
+    nodes = assembleProfile(legacySources(profile, config), config.preferredIps || '').nodes;
   }
-
-  const filename = ensureExtension(requestedName || subscriptionName || 'subscription', ext);
-  const headers = { 'content-disposition': buildContentDisposition(filename) };
-
-  if (target === 'clash') return text(renderClash(cdnNodes, { extraNodes, extraNodesYaml }), 200, 'text/yaml; charset=utf-8', headers);
-  if (target === 'surge') return text(renderSurge(cdnNodes), 200, 'text/plain; charset=utf-8', headers);
-  // For raw format, include CDN + extra nodes (shared YAML is Clash-specific)
-  const allNodes = [...cdnNodes, ...extraNodes];
-  return text(renderRaw(allNodes), 200, 'text/plain; charset=utf-8', headers);
+  const headers = { 'content-disposition': buildContentDisposition(ensureExtension(requestedName || subscriptionName || 'subscription', ext)),
+    'cache-control': 'private, no-store', vary: 'User-Agent' };
+  if (nodes) {
+    if (target === 'clash') return text(renderClash([], { clashProxies: nodes.map(n => n.proxy) }), 200, 'text/yaml; charset=utf-8', headers);
+    if (target === 'raw') return text(renderProfileRaw(nodes), 200, 'text/plain; charset=utf-8', headers);
+    if (target === 'surge') {
+      if (nodes.some(n => !n.rawLink || !['vmess', 'trojan'].includes(n.proxy.type) || !['tcp', 'ws'].includes(n.proxy.network))) throw new ConfigError('此订阅包含当前 Surge 导出不支持的节点，请使用 Clash 订阅');
+      const parsed = nodes.flatMap(n => parseNodeLinks(n.rawLink).nodes);
+      return text(renderSurgeSubscription(parsed, req.url), 200, 'text/plain; charset=utf-8', headers);
+    }
+    throw new ConfigError('不支持的订阅格式');
+  }
+  // Keep existing static subscription links working.
+  const staticNodes = data.nodes || [];
+  if (target === 'clash') return text(renderClash(staticNodes), 200, 'text/yaml; charset=utf-8', headers);
+  if (target === 'surge') return text(renderSurge(staticNodes), 200, 'text/plain; charset=utf-8', headers);
+  return text(renderRaw(staticNodes), 200, 'text/plain; charset=utf-8', headers);
 }
 
 export default {
@@ -785,11 +763,13 @@ export default {
       // Admin API
       if (url.pathname === '/api/admin/config' && req.method === 'GET') return await handleAdminGetConfig(req, env);
       if (url.pathname === '/api/admin/config' && req.method === 'PUT') return await handleAdminPutConfig(req, env);
+      if (url.pathname === '/api/admin/import' && req.method === 'POST') return await handleAdminImport(req, env);
+      if (url.pathname === '/api/admin/preview' && req.method === 'POST') return await handleAdminPreview(req, env);
       if (url.pathname === '/api/admin/profiles' && req.method === 'GET') return await handleAdminGetProfiles(req, env);
       if (url.pathname === '/api/admin/profiles' && req.method === 'POST') return await handleAdminPostProfile(req, env, url);
       if (url.pathname.startsWith('/api/admin/profiles/') && req.method === 'DELETE') return await handleAdminDeleteProfile(req, env);
-      if (url.pathname.startsWith('/sub/')) return await handleSub(url, env);
+      if (url.pathname.startsWith('/sub/')) return await handleSub(req, url, env);
       return await env.ASSETS.fetch(req);
-    } catch (e) { return json({ ok: false, error: e.message }, 500); }
+    } catch (e) { return json({ ok: false, error: e.message }, e.status || 500); }
   }
 };

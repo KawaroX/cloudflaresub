@@ -4,230 +4,75 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>订阅管理后台</title>
-    <link rel="icon" href="/icons/auto.svg" type="image/svg+xml">
+    <link rel="icon" href="/icons/auto.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
-    <style>
-      .admin-section { margin-bottom: 24px; }
-      .admin-section h2 { margin-bottom: 14px; }
-      .template-card {
-        padding: 16px;
-        border-radius: 16px;
-        border: 1px solid rgba(148, 163, 184, 0.16);
-        background: rgba(255, 255, 255, 0.02);
-        margin-bottom: 14px;
-      }
-      .template-card h3 { margin-bottom: 10px; font-size: 16px; }
-      .form-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin-bottom: 12px;
-      }
-      .form-row.three-col { grid-template-columns: 1fr 1fr 1fr; }
-      .form-group { display: flex; flex-direction: column; gap: 6px; }
-      .form-group label { font-size: 0.88rem; font-weight: 500; margin-bottom: 0; }
-      .form-group input, .form-group textarea, .form-group select {
-        width: 100%;
-        border-radius: 10px;
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        background: rgba(15, 23, 42, 0.9);
-        color: var(--text);
-        padding: 10px 12px;
-        font-size: 0.9rem;
-        outline: none;
-      }
-      .form-group input:focus, .form-group textarea:focus {
-        border-color: rgba(96, 165, 250, 0.72);
-        box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.12);
-      }
-      .profile-card {
-        padding: 18px;
-        border-radius: 18px;
-        border: 1px solid rgba(120, 140, 180, 0.16);
-        background: rgba(255, 255, 255, 0.025);
-        margin-bottom: 16px;
-      }
-      .profile-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 12px;
-      }
-      .profile-header h3 { margin: 0; font-size: 18px; }
-      .profile-urls {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-top: 12px;
-      }
-      .profile-url-row {
-        display: grid;
-        grid-template-columns: 80px 1fr auto;
-        gap: 8px;
-        align-items: center;
-      }
-      .profile-url-row span { font-size: 0.88rem; color: var(--muted); }
-      .profile-url-row input { font-size: 0.85rem; padding: 8px 10px; }
-      .btn-danger {
-        background: rgba(248, 113, 113, 0.15);
-        color: var(--danger);
-        border: 1px solid rgba(248, 113, 113, 0.25);
-      }
-      .btn-danger:hover { background: rgba(248, 113, 113, 0.25); }
-      .status-msg {
-        padding: 10px 14px;
-        border-radius: 12px;
-        font-size: 0.9rem;
-        margin-top: 10px;
-      }
-      .status-msg.success {
-        background: rgba(52, 211, 153, 0.12);
-        border: 1px solid rgba(52, 211, 153, 0.2);
-        color: #bbf7d0;
-      }
-      .status-msg.error {
-        background: rgba(248, 113, 113, 0.1);
-        border: 1px solid rgba(248, 113, 113, 0.2);
-        color: #fca5a5;
-      }
-      .auth-bar {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 12px;
-        align-items: end;
-        margin-bottom: 24px;
-      }
-      .uuid-row {
-        display: grid;
-        grid-template-columns: 140px 1fr;
-        gap: 8px;
-        align-items: center;
-        margin-bottom: 8px;
-      }
-      .uuid-row span { font-size: 0.88rem; color: var(--muted); }
-      .divider {
-        border: none;
-        border-top: 1px solid var(--line);
-        margin: 18px 0;
-      }
-      @media (max-width: 640px) {
-        .form-row, .form-row.three-col { grid-template-columns: 1fr; }
-        .profile-url-row { grid-template-columns: 1fr; }
-        .profile-url-row span { display: none; }
-        .auth-bar { grid-template-columns: 1fr; }
-      }
-    </style>
+    <link rel="stylesheet" href="/admin.css" />
   </head>
   <body>
     <main class="container">
-      <section class="hero card" style="grid-template-columns: 1fr;">
+      <section class="hero card">
         <div>
           <p class="eyebrow">Admin Panel</p>
-          <h1 class="hero-title">
-            <img src="/icons/auto.svg" alt="logo" class="hero-logo" />
-            <span>订阅管理后台</span>
-          </h1>
-          <p class="lead">管理优选 IP、额外节点模板和多用户配置。更新优选 IP 后，所有用户刷新订阅自动获得新 IP。</p>
+          <h1 class="hero-title"><img src="/icons/auto.svg" alt="" class="hero-logo" />订阅管理后台</h1>
+          <p class="lead">共用一份优选 IP，为每个人自由组合节点。</p>
         </div>
       </section>
-
-      <!-- Auth -->
       <div class="auth-bar">
         <div class="form-group">
           <label for="authToken">访问令牌 (SUB_ACCESS_TOKEN)</label>
-          <input id="authToken" type="password" placeholder="输入 SUB_ACCESS_TOKEN" />
+          <input id="authToken" type="password" autocomplete="off" placeholder="输入访问令牌" />
         </div>
         <button id="loadBtn" type="button">加载配置</button>
       </div>
+      <div id="statusGlobal" role="status" aria-live="polite"></div>
 
-      <div id="statusGlobal"></div>
-
-      <!-- Section 1: Global Config -->
-      <section id="configSection" class="card admin-section" style="padding: 24px;">
-        <h2>全局配置</h2>
-
-        <div class="form-group" style="margin-bottom: 16px;">
-          <label for="preferredIps">优选 IP 列表</label>
-          <textarea id="preferredIps" rows="8" placeholder="104.16.1.2#US-1&#10;104.17.2.3#US-2&#10;..."></textarea>
-          <p class="hint">每行一个，格式：IP#标签 或 IP:端口#标签</p>
+      <section class="card admin-section" aria-labelledby="globalHeading">
+        <div class="section-heading"><h2 id="globalHeading">公共优选 IP</h2><span id="ipCount" class="badge">尚未加载</span></div>
+        <p class="hint">所有用户共用。按从上到下的顺序取前 N 个，想优先使用的地址放在前面。</p>
+        <div class="form-group">
+          <label for="preferredIps">优选地址列表</label>
+          <textarea id="preferredIps" rows="7" spellcheck="false" placeholder="104.16.1.2#US-1&#10;104.17.2.3:2053#US-2"></textarea>
+          <p class="hint">每行一个 IP 或域名，可加 :端口 和 #备注。未填写端口时沿用节点端口；空行和以 # 开头的注释会忽略。</p>
         </div>
-
-        <hr class="divider" />
-
-        <h3>共享 Hysteria2 节点 (原始 Clash YAML)</h3>
-        <div class="form-group" style="margin-bottom: 16px;">
-          <textarea id="sharedExtraNodesYaml" rows="10" placeholder='  - name: "🇺🇸 US-hy2"&#10;    type: hysteria2&#10;    server: 1.2.3.4&#10;    port: 443&#10;    password: "your-password"&#10;    sni: "example.com"&#10;    skip-cert-verify: true&#10;    udp: true'></textarea>
-          <p class="hint">直接粘贴 Clash proxies 格式的 YAML（注意缩进为 2 空格开头）。</p>
-        </div>
-
-        <hr class="divider" />
-
-        <h3>额外节点模板</h3>
-        <p class="hint" style="margin-bottom: 14px;">定义 gRPC+Reality / TCP+Reality 等非 CDN 节点的模板。每个用户可以有不同的 UUID。</p>
-
-        <div id="templatesContainer"></div>
-
-        <button id="addTemplateBtn" type="button" class="secondary" style="margin-top: 8px;">+ 添加模板</button>
-
-        <hr class="divider" />
-
-        <div class="actions">
-          <button id="saveConfigBtn" type="button">保存全局配置</button>
-        </div>
-        <div id="configStatus"></div>
+        <div class="actions"><button id="saveConfigBtn" type="button" disabled>保存公共 IP</button></div>
+        <div id="configStatus" role="status" aria-live="polite"></div>
       </section>
 
-      <!-- Section 2: User Profiles -->
-      <section id="profilesSection" class="card admin-section" style="padding: 24px;">
-        <h2>用户配置管理</h2>
-        <p class="hint" style="margin-bottom: 16px;">每个用户有独立的 ws 节点链接、各协议 UUID 和订阅链接。</p>
+      <section class="card admin-section" aria-labelledby="profilesHeading">
+        <div class="section-heading"><h2 id="profilesHeading">用户订阅</h2><button id="newProfileBtn" type="button" class="secondary" disabled>+ 新建用户</button></div>
+        <p class="hint">每个人的节点和优选设置独立保存，订阅链接保持固定。</p>
+        <div id="profilesList"><p class="empty-state">加载配置后选择要编辑的用户。</p></div>
+      </section>
 
-        <div id="profilesList"></div>
-
+      <section id="editorSection" class="card admin-section" aria-labelledby="editorHeading" hidden>
+        <div class="section-heading"><h2 id="editorHeading">新建用户</h2><span id="draftState" class="badge">未保存</span></div>
+        <div class="form-row">
+          <div class="form-group"><label for="pId">用户 ID</label><input id="pId" type="text" placeholder="例如 awa，留空自动生成" /></div>
+          <div class="form-group"><label for="pName">用户名称</label><input id="pName" type="text" placeholder="例如 Awa" /></div>
+          <div class="form-group"><label for="pSubName">订阅名称</label><input id="pSubName" type="text" placeholder="例如 awa-sub" /></div>
+        </div>
         <hr class="divider" />
-
-        <h3>添加 / 编辑用户</h3>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="pId">用户 ID（编辑时填写已有 ID）</label>
-            <input id="pId" type="text" placeholder="留空自动生成" />
-          </div>
-          <div class="form-group">
-            <label for="pName">用户名称</label>
-            <input id="pName" type="text" placeholder="例如 Alice" />
-          </div>
+        <h3>添加节点</h3>
+        <div class="form-group">
+          <label for="importFormat">输入方式</label>
+          <select id="importFormat"><option value="link">节点链接</option><option value="yaml">Clash YAML</option></select>
+          <label for="importContent" id="importLabel">节点链接（每行一个）</label>
+          <textarea id="importContent" rows="5" spellcheck="false" placeholder="vless://uuid@server:443?type=xhttp&amp;security=tls&amp;path=%2Fxhttp%2F#美国节点"></textarea>
+          <p id="importHint" class="hint">支持 VLESS、VMess、Trojan、Hysteria2 链接。批量导入后，每个节点可以分别设置优选数量。</p>
         </div>
-        <div class="form-group" style="margin-bottom: 12px;">
-          <label for="pWsNodeLink">WS+TLS 节点链接</label>
-          <textarea id="pWsNodeLink" rows="3" placeholder="vless://uuid@edge:443?type=ws&security=tls&host=xxx&sni=xxx#ws"></textarea>
+        <div class="actions"><button id="importBtn" type="button" class="secondary">添加到此用户</button></div>
+        <div id="importStatus" role="status" aria-live="polite"></div>
+        <hr class="divider" />
+        <div class="section-heading"><h3>此用户的节点</h3><span id="nodeCount" class="badge">0 个</span></div>
+        <p class="hint">开启优选：原始地址为 名称-0，优选地址为 名称-1、名称-2……。关闭优选：只保留原始节点。设置适用于任意协议，请确保节点支持所选 CDN 地址。</p>
+        <div id="nodesList"></div>
+        <div class="actions editor-actions">
+          <button id="saveProfileBtn" type="button">保存用户订阅</button>
+          <button id="previewBtn" type="button" class="secondary">预览生成节点</button>
+          <button id="clearProfileBtn" type="button" class="secondary">关闭编辑</button>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="pSubName">订阅名称</label>
-            <input id="pSubName" type="text" placeholder="例如 alice-sub" />
-          </div>
-          <div class="form-group" style="display: flex; flex-direction: row; align-items: center; gap: 14px; padding-top: 22px;">
-            <label style="display: flex; align-items: center; gap: 8px;">
-              <input id="pKeepHost" type="checkbox" checked style="width:18px;height:18px;" />
-              保留原 Host/SNI
-            </label>
-            <label style="display: flex; align-items: center; gap: 8px;">
-              <input id="pFlagEmoji" type="checkbox" style="width:18px;height:18px;" />
-              添加旗帜 Emoji
-            </label>
-          </div>
-        </div>
-
-        <div id="profileUuidsContainer" style="margin-bottom: 12px;">
-          <label style="margin-bottom: 8px;">各模板的 UUID</label>
-          <div id="profileUuidsFields"></div>
-        </div>
-
-        <div class="actions">
-          <button id="saveProfileBtn" type="button">保存用户</button>
-          <button id="clearProfileBtn" type="button" class="secondary">清空表单</button>
-        </div>
-        <div id="profileStatus"></div>
+        <div id="profileStatus" role="status" aria-live="polite"></div>
+        <div id="preview" hidden aria-live="polite"></div>
       </section>
     </main>
     <script type="module" src="/admin.js"></script>
